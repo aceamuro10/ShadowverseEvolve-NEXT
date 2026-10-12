@@ -15,7 +15,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSettings } from "../../app/settings";
 import { onBeforeUpdate } from "../../app/store";
-import type { CardInfo, GameUpdate } from "../../engine/protocol";
+import type { CardInfo } from "../../engine/protocol";
+import type { GameUpdate } from "../../presentation/protocol";
+import { tableAnimations } from "../../presentation/animation-barrier";
 import { Arrow, type Point } from "../board/Arrow";
 import { CardTile } from "../card/CardTile";
 import { flip, floatText, flyIn, flyOut, lunge, popIn, shake } from "./effects";
@@ -36,6 +38,7 @@ interface Showcase {
   card: CardInfo;
   own: boolean;
   delay: number;
+  done?: () => void;
 }
 
 interface Flash {
@@ -62,7 +65,7 @@ function animate(update: GameUpdate, snapshot: Snapshot, fx: Effects): void {
   // 3. Played cards in their corners.
   const corner = new Map<CardId, string>();
   for (const p of plan.played) {
-    const key = `${update.inputCount}:${p.id}`;
+    const key = `${update.animationKey ?? update.inputCount}:${p.id}`;
     corner.set(p.id, key);
     fx.show({ key, card: p.card, own: p.player === update.perspective, delay: p.at });
   }
@@ -142,29 +145,90 @@ export function AnimationLayer({ update }: { update: GameUpdate }) {
   const [showcases, setShowcases] = useState<Showcase[]>([]);
   const [flashes, setFlashes] = useState<Flash[]>([]);
   const timers = useRef(new Set<number>());
+  const running = useRef(new Set<Animation>());
+  const lastSeed = useRef(update.seed);
   const seq = useRef(0);
+  const lastKey = useRef<string | undefined>(undefined);
+  const groupSnapshot = useRef<{ group: string; snapshot: Snapshot } | null>(null);
   useEffect(() => {
     const pending = timers.current;
+    const animations = running.current;
     return () => {
       for (const timer of pending) window.clearTimeout(timer);
+      for (const animation of animations) animation.cancel();
+      tableAnimations.reset();
     };
   }, []);
   useLayoutEffect(() => {
-    const snapshot = takeSnapshot();
-    if (!animations || !snapshot || update.logReset) return;
+    let snapshot = takeSnapshot();
+    const key = update.animationKey;
+    if (!key || key === lastKey.current) return;
+    lastKey.current = key;
+    if (update.logReset || lastSeed.current !== update.seed) {
+      for (const timer of timers.current) window.clearTimeout(timer);
+      timers.current.clear();
+      for (const animation of running.current) animation.cancel();
+      running.current.clear();
+      setShowcases([]);
+      setFlashes([]);
+      groupSnapshot.current = null;
+    }
+    lastSeed.current = update.seed;
+    if (update.animationGroup && snapshot) {
+      const previous = groupSnapshot.current;
+      if (previous?.group === update.animationGroup) {
+        // Later slices may refer to a card already removed by the final authoritative view.
+        snapshot = { cards: new Map([...snapshot.cards, ...previous.snapshot.cards]), zones: snapshot.zones };
+      }
+      groupSnapshot.current = { group: update.animationGroup, snapshot };
+    } else groupSnapshot.current = null;
+    if (!animations || !snapshot || update.logReset) {
+      tableAnimations.started(key);
+      return;
+    }
+    const track = (fn: () => void) => {
+      const before = new Set(document.getAnimations());
+      fn();
+      for (const animation of document.getAnimations()) {
+        if (before.has(animation)) continue;
+        running.current.add(animation);
+        const done = tableAnimations.task(key);
+        const finish = () => {
+          animation.removeEventListener("finish", finish);
+          animation.removeEventListener("cancel", finish);
+          running.current.delete(animation);
+          done();
+        };
+        // The finished promise resolves before onfinish removes flight ghosts/restores the card.
+        // Wait for the event, after the effect's own cleanup, before releasing the next dice step.
+        animation.addEventListener("finish", finish);
+        animation.addEventListener("cancel", finish);
+      }
+    };
     const later = (ms: number, fn: () => void) => {
-      if (ms <= 0) return fn();
+      if (ms <= 0) return track(fn);
+      const done = tableAnimations.task(key);
       const timer = window.setTimeout(() => {
         timers.current.delete(timer);
-        fn();
+        track(fn);
+        done();
       }, ms);
       timers.current.add(timer);
     };
-    animate(update, snapshot, {
+    track(() => animate({ ...update, log: update.animationLog ?? update.log }, snapshot, {
       later,
       show: (showcase) => {
-        setShowcases((all) => [...all, showcase]);
-        later(showcase.delay + TIMING.showcase, () => setShowcases((all) => all.filter((s) => s.key !== showcase.key)));
+        const done = tableAnimations.task(key);
+        let timer: number | undefined;
+        const finish = () => {
+          if (timer !== undefined) { window.clearTimeout(timer); timers.current.delete(timer); }
+          done();
+          setShowcases((all) => all.filter((s) => s.key !== showcase.key));
+        };
+        setShowcases((all) => [...all, { ...showcase, done: finish }]);
+        // Fallback for cancelled CSS animation/background tabs. Normal completion is the actual animation end.
+        timer = window.setTimeout(finish, showcase.delay + TIMING.showcase + 150);
+        timers.current.add(timer);
       },
       flash: (ms, variant, from, to) =>
         later(ms, () => {
@@ -174,7 +238,8 @@ export function AnimationLayer({ update }: { update: GameUpdate }) {
           setFlashes((all) => [...all, { key, from: a, to: b, variant }]);
           later(TIMING.arrow, () => setFlashes((all) => all.filter((f) => f.key !== key)));
         }),
-    });
+    }));
+    tableAnimations.started(key);
   }, [update, animations]);
   const table = document.querySelector(".sve-table");
   return (
@@ -188,6 +253,7 @@ export function AnimationLayer({ update }: { update: GameUpdate }) {
                 style={{ animationDelay: `${s.delay}ms` }}
                 data-showcase={s.key}
                 data-testid="showcase"
+                onAnimationEnd={(event) => { if (event.animationName.startsWith("sve-showcase-wipe")) s.done?.(); }}
               >
                 <div className="sve-showcase-card">
                   <CardTile info={s.card} />

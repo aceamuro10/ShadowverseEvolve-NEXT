@@ -16,6 +16,7 @@ export class DiceObserver {
   private readonly prefix = `dice-session:${++sessionSerial}`;
   private serial = 0;
   private steps: DiceStep[] = [];
+  private eventCount = 0;
   private active: { player: 0 | 1; result: number } | null = null;
   prompt: DiePrompt | null = null;
 
@@ -25,7 +26,7 @@ export class DiceObserver {
 
   private key(): string { return `${this.prefix}:${++this.serial}`; }
   private thrown(player: 0 | 1, result: number, reroll: boolean): void {
-    this.steps.push({ type: "throw", key: this.key(), player, result, reroll });
+    this.steps.push({ type: "throw", key: this.key(), player, result, reroll, afterEvents: this.eventCount });
   }
 
   /** Call only after a successful real act. Every reroll choice is a separate actual act boundary. */
@@ -35,7 +36,10 @@ export class DiceObserver {
     let finishing = this.active;
     this.prompt = null;
     for (const event of events) {
-      if (event.type !== "dieRolled") continue;
+      if (event.type !== "dieRolled") {
+        if (event.type !== "cardsLookedAt") this.eventCount++;
+        continue;
+      }
       if (finishing && previous && event.player === finishing.player && (answer === "keep" || answer === "reroll")) {
         // Keep confirms an already shown throw; the last reroll has no following choice to carry its result.
         if (answer === "reroll" || event.result !== finishing.result) this.thrown(event.player, event.result, answer === "reroll");
@@ -44,20 +48,22 @@ export class DiceObserver {
       } else {
         this.thrown(event.player, event.result, false);
       }
-      this.steps.push({ type: "settled", key: this.key(), player: event.player, result: event.result });
+      this.eventCount++;
+      this.steps.push({ type: "settled", key: this.key(), player: event.player, result: event.result, afterEvents: this.eventCount });
     }
     const current = rerollResult(after);
     if (current) {
       this.thrown(current.player, current.result, !!finishing && answer === "reroll");
       this.active = current;
       this.prompt = { key: this.key(), ...current };
-      this.steps.push({ type: "prompt", ...this.prompt });
+      this.steps.push({ type: "prompt", ...this.prompt, afterEvents: this.eventCount });
     } else this.active = null;
   }
 
   drain(reset = false): DiceStep[] {
     const steps = this.steps;
     this.steps = [];
+    this.eventCount = 0;
     return reset ? [] : steps;
   }
 }

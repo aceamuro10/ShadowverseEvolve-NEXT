@@ -93,6 +93,7 @@ export function floatText(x: number, y: number, text: string, kind: "damage" | "
     { duration: 1150, easing: "ease-out" },
   );
   animation.onfinish = () => label.remove();
+  animation.oncancel = () => label.remove();
 }
 
 /** A follower evolves: it turns over, lit up. */

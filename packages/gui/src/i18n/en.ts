@@ -431,7 +431,7 @@ export const en = {
   "decision.down": "Down",
   "decision.source": "From {card}",
   "decision.processingAbility": "Processing ability: {ability}",
-  "decision.triggerDie": "Triggering die result: {n}",
+  "decision.triggerDie": "Die result: {n}",
   "dice.roll": "{player} rolls a die",
   "dice.reroll": "{player} rerolls the die",
   "dice.inquiry": "{player}: reroll decision",

@@ -435,7 +435,7 @@ export const ja: Record<MessageKey, string> = {
   "decision.down": "下へ",
   "decision.source": "{card}より",
   "decision.processingAbility": "処理中の能力：{ability}",
-  "decision.triggerDie": "誘発時のサイコロの目：{n}",
+  "decision.triggerDie": "サイコロの目：{n}",
   "dice.roll": "{player}がサイコロをふる",
   "dice.reroll": "{player}がサイコロをふりなおす",
   "dice.inquiry": "{player}：ふりなおすか選択",

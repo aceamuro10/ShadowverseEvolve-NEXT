@@ -434,7 +434,7 @@ export const zh: Record<MessageKey, string> = {
   "decision.down": "下移",
   "decision.source": "来自 {card}",
   "decision.processingAbility": "正在处理能力：{ability}",
-  "decision.triggerDie": "诱发时掷骰点数：{n}",
+  "decision.triggerDie": "掷骰点数：{n}",
   "dice.roll": "{player}掷骰子",
   "dice.reroll": "{player}重掷骰子",
   "dice.inquiry": "{player}：是否重掷",

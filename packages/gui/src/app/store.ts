@@ -8,6 +8,7 @@ import { playUpdateSounds } from "../resources/sound";
 import { Catalog } from "./catalog";
 import { getSettings } from "./settings";
 import { DicePlayback, type DiceFrame } from "../presentation/dice-playback";
+import { tableAnimations } from "../presentation/animation-barrier";
 
 export interface AppError {
   id: number;
@@ -53,23 +54,31 @@ export function onBeforeUpdate(fn: (update: GameUpdate) => void): () => void {
   return () => beforeUpdate.delete(fn);
 }
 
-function publishUpdate(update: GameUpdate, interactive: boolean): void {
+function publishUpdate(update: GameUpdate, interactive: boolean, appendLog = true): void {
+  if (update.logReset) tableAnimations.reset();
+  update.animationKey = diceScreenActive ? tableAnimations.reserve() : undefined;
   for (const fn of beforeUpdate) fn(update);
-  playUpdateSounds(update, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
+  playUpdateSounds({ ...update, log: update.animationLog ?? update.log }, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
   const allowed = interactive && update === state.authoritative;
   setState({ update: allowed ? update : { ...update, decision: null, manual: null, announcement: null, looked: null },
-    log: update.logReset ? update.log : [...state.log, ...update.log], diceBusy: !allowed });
+    log: appendLog ? update.logReset ? update.log : [...state.log, ...update.log] : state.log, diceBusy: !allowed });
 }
 
 export const dicePlayback = new DicePlayback({
   block: () => {
-    const update = state.update ? { ...state.update, decision: null, manual: null, announcement: null, looked: null, effectContext: null, log: [] } : null;
+    const update = state.update ? { ...state.update, decision: null, manual: null, announcement: null, looked: null, effectContext: null, log: [], animationLog: [], animationKey: undefined } : null;
     if (update) for (const fn of beforeUpdate) fn(update);
     setState({ diceBusy: true, ...(update ? { update } : {}) });
   },
   frame: (dice) => setState({ dice }),
   publish: publishUpdate,
   idle: () => setState({ diceBusy: false }),
+  animate: (update, entries, done) => {
+    publishUpdate({ ...update, log: [], animationLog: entries, effectContext: null, decision: null, manual: null, announcement: null, looked: null }, false, false);
+    void tableAnimations.wait().then(done);
+  },
+  waitForAnimations: (done) => { void tableAnimations.wait().then(done); },
+  resetAnimations: () => tableAnimations.reset(),
 }, () => getSettings().animations && !globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 
 let diceScreenActive = false;

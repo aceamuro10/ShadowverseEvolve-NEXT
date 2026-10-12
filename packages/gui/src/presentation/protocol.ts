@@ -1,6 +1,6 @@
 // Local worker-to-page presentation extensions. Keep engine/protocol.ts unchanged: it is fingerprinted.
 import type { CardId, DefId, PlayerId } from "@sve/core";
-import type { CardInfo } from "../engine/protocol";
+import type { CardInfo, LogEntry } from "../engine/protocol";
 import type { FromWorker as EngineMessage, GameUpdate as EngineUpdate } from "../engine/protocol";
 
 /** Additional presentation data for a visible instance. Type, stats and gifts remain in CardView. */
@@ -22,13 +22,22 @@ export interface GameUpdate extends EngineUpdate {
   diceSteps?: DiceStep[];
   /** The real current reroll boundary, including bot/remote decisions hidden from this viewer. */
   diePrompt?: DiePrompt | null;
+  /** Page-local animation slice. The actual rule log is always kept intact. */
+  animationLog?: LogEntry[];
+  animationKey?: string;
+  animationGroup?: string;
+  /** A dice prelude already animated this Quick play; its final summary keeps a static card. */
+  announcementIntroduced?: boolean;
 }
 
 export interface DiePrompt { key: string; player: PlayerId; result: number }
-export type DiceStep =
+export type DiceStep = (
   | { type: "throw"; key: string; player: PlayerId; result: number; reroll: boolean }
   | ({ type: "prompt" } & DiePrompt)
-  | { type: "settled"; key: string; player: PlayerId; result: number };
+  | { type: "settled"; key: string; player: PlayerId; result: number }) & {
+    /** Number of preceding events in this publication, excluding private cardsLookedAt events. */
+    afterEvents?: number;
+  };
 
 /** Identity is kept independently of language; the page resolves text when its card language changes. */
 export interface AbilityDisplayContext {

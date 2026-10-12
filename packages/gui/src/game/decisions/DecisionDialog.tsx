@@ -140,8 +140,8 @@ function SelectPending({ d, info, update, answer, busy }: FormProps<"selectPendi
               <span>
                 {o.head}
                 {twins.length > 1 ? ` (${twins.indexOf(o) + 1})` : ""}
+                {o.die ? <> <TriggerDie die={o.die} /></> : null}
               </span>
-              <TriggerDie die={o.die} />
               {o.provider ? <span className="sve-ability-provider">{o.provider}</span> : null}
               {o.text ? <CardTextLine className="sve-pending-text" line={o.text.text} lang={o.text.lang} /> : null}
             </ActionButton>

@@ -40,6 +40,28 @@ function setup(times = 1, rerolls = 0, extra: string[] = [], autoResolve?: ("qui
 }
 
 describe("dice observations from the original live session", () => {
+  it("anchors each throw before its own real dieRolled event, preserving intervening effects", () => {
+    const t = setup(3);
+    t.observer.dice.drain(true); // The host's initial publication consumes startup events as well.
+    t.activate();
+    const visible = t.events.filter((e) => e.type !== "cardsLookedAt");
+    const throws = t.observer.dice.drain().filter((s) => s.type === "throw");
+    expect(throws.map((s) => s.afterEvents)).toEqual(visible.flatMap((e, i) => e.type === "dieRolled" ? [i] : []));
+  });
+
+  it("keeps anchors stable whether private look-at events are retained or hidden by the host", () => {
+    const observer = new DiceObserver();
+    observer.observe(null, null, [
+      { type: "cardPlayed", player: 0, card: "source", def: "ROLL", from: "hand" },
+      { type: "cardsLookedAt", player: 0, cards: [] },
+      { type: "dieRolled", player: 0, result: 2 },
+      { type: "dieRolled", player: 0, result: 5 },
+    ], null);
+    expect(observer.drain().filter((s) => s.type === "throw").map((s) => s.afterEvents)).toEqual([1, 2]);
+    observer.observe(null, null, [{ type: "dieRolled", player: 0, result: 6 }], null);
+    expect(observer.drain()[0]?.afterEvents).toBe(0);
+  });
+
   it.each([1, 2, 3])("records every one of %i consecutive rolls without changing state or RNG", (times) => {
     const t = setup(times);
     t.activate();

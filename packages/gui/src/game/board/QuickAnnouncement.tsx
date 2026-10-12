@@ -7,7 +7,8 @@ import type { CardId, Decision } from "@sve/core";
 import { cardName } from "../../app/catalog";
 import { useSettings } from "../../app/settings";
 import { engine, useApp } from "../../app/store";
-import type { CardInfo, GameUpdate, QuickAnnouncement as Announcement } from "../../engine/protocol";
+import type { CardInfo, GameUpdate as EngineUpdate, QuickAnnouncement as Announcement } from "../../engine/protocol";
+import type { GameUpdate as PresentationUpdate } from "../../presentation/protocol";
 import { findCard } from "../../engine/view-utils";
 import { useT } from "../../i18n";
 import { flyIn } from "../animation/effects";
@@ -17,6 +18,8 @@ import { cardLabel, playerLabel } from "../labels";
 import { optionText } from "../options";
 import { Arrow, cardCenter, type Point } from "./Arrow";
 import { useBack } from "../../app/back";
+
+type GameUpdate = EngineUpdate & Pick<PresentationUpdate, "announcementIntroduced">;
 
 export function QuickAnnouncement({ update }: { update: GameUpdate }) {
   const announcement = update.announcement;
@@ -36,10 +39,10 @@ function AnnouncementWindow({ update, announcement: a }: { update: GameUpdate; a
   useLayoutEffect(() => {
     const element = cardRef.current;
     const mats = document.querySelector(".sve-mats")?.getBoundingClientRect();
-    if (!element || !mats || !animations) return;
+    if (!element || !mats || !animations || update.announcementIntroduced) return;
     const box = element.getBoundingClientRect();
     flyIn(element, new DOMRect(mats.left + mats.width / 2 - box.width / 2, mats.top + mats.height / 2 - box.height / 2, box.width, box.height), 420);
-  }, [animations]);
+  }, [animations, update.announcementIntroduced]);
 
   // The selected cards still on the table light up; once the card has arrived, arrows point at them.
   useEffect(() => {

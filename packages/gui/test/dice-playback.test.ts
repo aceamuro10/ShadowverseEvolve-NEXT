@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DicePlayback, type DiceFrame } from "../src/presentation/dice-playback";
 import type { DiceStep, GameUpdate } from "../src/presentation/protocol";
+import { DICE_TIMING } from "../src/presentation/dice-timing";
 
 const thrown = (key: string, result = 3): DiceStep => ({ type: "throw", key, player: 0, result, reroll: key !== "first" });
 const prompt = (key: string): DiceStep => ({ type: "prompt", key, player: 0, result: 3 });
@@ -72,11 +73,15 @@ describe("serial dice playback and decision gates", () => {
   });
 
   it("uses static results with the same gate when animations are disabled", () => {
+    vi.useFakeTimers();
     const t = setup(false);
     t.playback.enqueue(update([thrown("first"), prompt("q")], 1, "q"));
-    expect(t.frame()).toMatchObject({ animated: false, duration: 260 });
+    expect(t.frame()).toMatchObject({ animated: false, duration: DICE_TIMING.hold, hold: 0 });
     expect(t.publish).not.toHaveBeenCalled();
     t.finish();
+    expect(t.frame()).toBeNull();
+    expect(t.publish).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(DICE_TIMING.gap);
     expect(t.publish).toHaveBeenCalledTimes(1);
   });
 
@@ -105,5 +110,112 @@ describe("serial dice playback and decision gates", () => {
     const t = setup(); const u = update([thrown("first")]);
     t.playback.enqueue(u); t.finish(); t.playback.enqueue(u);
     expect(t.frames).toHaveLength(1);
+  });
+
+  it("holds the landed face before allowing a reroll inquiry", () => {
+    vi.useFakeTimers();
+    const t = setup();
+    t.playback.enqueue(update([thrown("first"), prompt("ask")], 1, "ask"));
+    t.playback.landed("first");
+    vi.advanceTimersByTime(DICE_TIMING.hold - 1);
+    expect(t.publish).not.toHaveBeenCalled();
+    t.playback.landed("first"); // A duplicate animation end must not extend or skip the hold.
+    vi.advanceTimersByTime(1);
+    expect(t.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides each static result for 100ms, including identical dice and the final transition", () => {
+    vi.useFakeTimers();
+    const t = setup(false);
+    t.playback.enqueue(update([thrown("a"), thrown("b"), thrown("c")]));
+    for (const key of ["a", "b", "c"]) {
+      expect(t.frame()).toMatchObject({ key });
+      t.finish();
+      expect(t.frame()).toBeNull();
+      expect(t.publish).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(99);
+      expect(t.frame()).toBeNull();
+      expect(t.publish).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+    }
+    expect(t.frames.map((f) => f.key)).toEqual(["a", "b", "c"]);
+    expect(t.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an empty static interval on seek without resurrecting its next die", () => {
+    vi.useFakeTimers();
+    const t = setup(false);
+    t.playback.enqueue(update([thrown("first"), thrown("second")]));
+    t.finish();
+    const reset = { ...update([]), logReset: true };
+    t.playback.enqueue(reset);
+    vi.runAllTimers();
+    expect(t.frames.map((f) => f.key)).toEqual(["first"]);
+    expect(t.publish.mock.calls).toEqual([[reset, true]]);
+  });
+
+  it("cancels the landed hold on seek and ignores its stale completion", () => {
+    vi.useFakeTimers();
+    const t = setup();
+    t.playback.enqueue(update([thrown("first")]));
+    t.playback.landed("first");
+    const reset = { ...update([]), logReset: true };
+    t.playback.enqueue(reset);
+    vi.runAllTimers();
+    expect(t.publish.mock.calls).toEqual([[reset, true]]);
+    expect(t.frame()).toBeNull();
+  });
+
+  it("waits for prior animations and plays event slices before each die without republishing their cosmetics", () => {
+    const calls: string[] = [];
+    let priorDone!: () => void;
+    let sliceDone!: () => void;
+    let frame: DiceFrame | null = null;
+    const playback = new DicePlayback({
+      block() {}, idle() {}, frame(f) { frame = f; if (f) calls.push(f.key); },
+      waitForAnimations(done) { priorDone = done; },
+      animate(_u, entries, done) { calls.push(entries.map((e) => e.event.type).join(",")); sliceDone = done; },
+      publish(u) { calls.push(`publish:${u.animationLog?.map((e) => e.event.type).join(",")}`); },
+    }, () => true);
+    const u = { ...update([{ ...thrown("first"), afterEvents: 1 }, { ...thrown("second"), afterEvents: 3 }]),
+      log: ["cardPlayed", "dieRolled", "cardsMoved", "dieRolled", "damageDealt"].map((type, seq) => ({ seq, event: { type }, cards: {} })) } as GameUpdate;
+    playback.enqueue(u);
+    expect(calls).toEqual([]);
+    priorDone();
+    expect(calls).toEqual(["cardPlayed"]);
+    sliceDone();
+    expect(frame).toMatchObject({ key: "first" });
+    playback.complete("first");
+    expect(calls.at(-1)).toBe("dieRolled,cardsMoved");
+    sliceDone(); playback.complete("second");
+    expect(calls).toEqual(["cardPlayed", "first", "dieRolled,cardsMoved", "second", "publish:dieRolled,damageDealt"]);
+    expect(u.log).toHaveLength(5);
+  });
+
+  it("does not resurrect a prelude or a pending throw after reset", () => {
+    let done!: () => void;
+    const publish = vi.fn();
+    const frame = vi.fn();
+    const playback = new DicePlayback({ block() {}, idle() {}, frame, publish,
+      waitForAnimations(callback) { done = callback; } }, () => true);
+    playback.enqueue(update([thrown("first")]));
+    const reset = { ...update([]), logReset: true };
+    playback.enqueue(reset); done();
+    expect(publish.mock.calls).toEqual([[reset, true]]);
+    expect(frame).not.toHaveBeenCalledWith(expect.objectContaining({ type: "throw" }));
+  });
+
+  it("does not animate a Quick card again in its summary after an earlier dice prelude", () => {
+    let preludeDone!: () => void;
+    const publish = vi.fn();
+    const playback = new DicePlayback({ block() {}, idle() {}, frame() {}, publish,
+      animate(_update, _entries, done) { preludeDone = done; } }, () => true);
+    const first = { ...update([{ ...thrown("first"), afterEvents: 1 }]),
+      log: [{ seq: 1, event: { type: "cardPlayed", card: "quick-card", player: 0, def: "SPELL", from: "hand" }, cards: {} }] } as GameUpdate;
+    playback.enqueue(first); preludeDone(); playback.complete("first");
+    const summary = { ...update([], 2), announcement: { source: "quick-card", seq: 1 } } as GameUpdate;
+    playback.enqueue(summary);
+    expect(summary.announcementIntroduced).toBe(true);
+    expect(publish).toHaveBeenLastCalledWith(summary, true);
   });
 });

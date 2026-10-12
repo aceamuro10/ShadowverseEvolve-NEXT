@@ -3,6 +3,7 @@ import { GameHost, timerScheduler, type GameHostOptions, type Scheduler } from "
 import { cardRuntimeDetails } from "./card-details";
 import { observePresentationEngine } from "./effect-context";
 import type { FromWorker } from "./protocol";
+import { DICE_TIMING } from "./dice-timing";
 
 /**
  * Outside the online fingerprint: observe actual inputs and extend output. The underlying host
@@ -29,7 +30,8 @@ export function createPresentationHost(
     const diceSteps = observer.dice.drain(message.update.logReset);
     if (message.update.logReset) displayUntil = 0;
     else {
-      const budget = diceSteps.reduce((ms, step) => ms + (step.type === "throw" ? 950 : step.type === "prompt" ? 400 : 0), 0);
+      const throwBudget = Math.max(DICE_TIMING.roll + DICE_TIMING.hold + DICE_TIMING.fallback, DICE_TIMING.hold + DICE_TIMING.gap);
+      const budget = diceSteps.reduce((ms, step) => ms + (step.type === "throw" ? throwBudget : step.type === "prompt" ? DICE_TIMING.inquiry : 0), 0);
       if (budget) displayUntil = Math.max(displayUntil, Date.now()) + budget;
     }
     send({ ...message, update: { ...message.update, cardDetails, ...abilities, diceSteps, diePrompt: observer.dice.prompt } });
