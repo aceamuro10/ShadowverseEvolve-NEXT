@@ -3919,3 +3919,35 @@ button.sve-online-thanks-sponsor:hover {
   cursor: pointer;
   -webkit-touch-callout: none;
 }
+
+/* Dice stay above the table while all rule answer entry points wait for their visible result. */
+.sve-dice-overlay {
+  position: fixed; z-index: 90; left: 50%; top: 38%; transform: translate(-50%, -50%);
+  display: grid; justify-items: center; gap: 12px; padding: 18px 26px; max-width: calc(100vw - 28px);
+  border: 1px solid #c2a65d; border-radius: 18px; background: #131c2eef; color: #fff;
+  box-shadow: 0 12px 40px #0008; pointer-events: none; text-align: center;
+}
+.sve-dice-caption { font-weight: 600; }
+.sve-die {
+  display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); gap: 8px;
+  width: 84px; height: 84px; padding: 13px; border-radius: 15px;
+  background: linear-gradient(135deg, #fff, #d3d8e1); box-shadow: 3px 6px 0 #8791a6, 0 10px 15px #0006;
+}
+.sve-die i { border-radius: 50%; }
+.sve-die-pip { background: #19243c; box-shadow: inset 1px 1px 2px #0008; }
+.sve-die-rolling { animation: sve-dice-roll 800ms ease-out both; }
+@keyframes sve-dice-roll {
+  0% { transform: translate(-70px, -22px) rotate(-290deg) scale(.72); opacity: .3; }
+  30% { transform: translate(28px, -15px) rotate(95deg); opacity: 1; }
+  55% { transform: translate(-10px, 4px) rotate(-28deg); }
+  72% { transform: translate(3px, -2px) rotate(8deg); }
+  85%, 100% { transform: none; }
+}
+.sve-dice-result { font-variant-numeric: tabular-nums; }
+.sve-trigger-die {
+  display: inline-block; width: fit-content; padding: 2px 7px; margin: 3px 0;
+  border: 1px solid #b89b52; border-radius: 5px; background: #8f6b1628; color: inherit;
+  font-size: .9em; font-weight: 600; white-space: nowrap;
+}
+.sve-ability-compact summary .sve-trigger-die { white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .sve-die-rolling { animation: none; } }

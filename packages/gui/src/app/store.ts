@@ -6,6 +6,8 @@ import type { LogEntry } from "../engine/protocol";
 import type { GameUpdate } from "../presentation/protocol";
 import { playUpdateSounds } from "../resources/sound";
 import { Catalog } from "./catalog";
+import { getSettings } from "./settings";
+import { DicePlayback, type DiceFrame } from "../presentation/dice-playback";
 
 export interface AppError {
   id: number;
@@ -20,9 +22,12 @@ export interface AppState {
   update: GameUpdate | null;
   log: LogEntry[];
   errors: AppError[];
+  authoritative: GameUpdate | null;
+  dice: DiceFrame | null;
+  diceBusy: boolean;
 }
 
-let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [] };
+let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false };
 const listeners = new Set<() => void>();
 
 /** The state now, outside React (online play reads how far the game is). */
@@ -48,6 +53,31 @@ export function onBeforeUpdate(fn: (update: GameUpdate) => void): () => void {
   return () => beforeUpdate.delete(fn);
 }
 
+function publishUpdate(update: GameUpdate, interactive: boolean): void {
+  for (const fn of beforeUpdate) fn(update);
+  playUpdateSounds(update, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
+  const allowed = interactive && update === state.authoritative;
+  setState({ update: allowed ? update : { ...update, decision: null, manual: null, announcement: null, looked: null },
+    log: update.logReset ? update.log : [...state.log, ...update.log], diceBusy: !allowed });
+}
+
+export const dicePlayback = new DicePlayback({
+  block: () => {
+    const update = state.update ? { ...state.update, decision: null, manual: null, announcement: null, looked: null, effectContext: null, log: [] } : null;
+    if (update) for (const fn of beforeUpdate) fn(update);
+    setState({ diceBusy: true, ...(update ? { update } : {}) });
+  },
+  frame: (dice) => setState({ dice }),
+  publish: publishUpdate,
+  idle: () => setState({ diceBusy: false }),
+}, () => getSettings().animations && !globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+
+let diceScreenActive = false;
+export function setDiceScreenActive(active: boolean): void {
+  diceScreenActive = active;
+  if (!active) dicePlayback.flush();
+}
+
 engine.subscribe((message) => {
   switch (message.kind) {
     case "ready":
@@ -55,9 +85,9 @@ engine.subscribe((message) => {
       break;
     case "update": {
       const update = message.update;
-      for (const fn of beforeUpdate) fn(update);
-      playUpdateSounds(update, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
-      setState({ update, log: update.logReset ? update.log : [...state.log, ...update.log] });
+      setState({ authoritative: update });
+      if (diceScreenActive) dicePlayback.enqueue(update);
+      else { dicePlayback.reset(); publishUpdate(update, true); }
       break;
     }
     case "error":

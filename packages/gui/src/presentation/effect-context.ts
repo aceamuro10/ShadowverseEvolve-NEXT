@@ -4,6 +4,7 @@ import type { GameUpdate as EngineUpdate } from "../engine/protocol";
 import { findCard, forEachCard } from "../engine/view-utils";
 import { abilitySource } from "./ability-source";
 import type { AbilityDisplayContext } from "./protocol";
+import { DiceObserver } from "./dice-observer";
 
 interface Saved {
   context: AbilityDisplayContext;
@@ -37,12 +38,17 @@ export class EffectContextObserver {
   private waiting = new Map<string, Saved>();
   private delayed = new Map<string, Saved>();
   private serial = 0;
+  readonly dice: DiceObserver;
 
-  constructor(private readonly engine: Engine, private readonly game: GameSession) {}
+  constructor(private readonly engine: Engine, private readonly game: GameSession) {
+    this.dice = new DiceObserver(game.startupEvents, game.decision);
+  }
 
-  private save(identity: Parameters<typeof abilitySource>[2], views: readonly PlayerView[] = [this.game.view(0), this.game.view(1)]): Saved {
+  private save(identity: Parameters<typeof abilitySource>[2] & { event?: GameEvent }, views: readonly PlayerView[] = [this.game.view(0), this.game.view(1)]): Saved {
+    const context = abilitySource(this.engine, this.game, identity, findCard(views[identity.controller]!, identity.source));
+    if (identity.event?.type === "dieRolled") context.triggerDie = { player: identity.event.player, result: identity.event.result };
     return {
-      context: abilitySource(this.engine, this.game, identity, findCard(views[identity.controller]!, identity.source)),
+      context,
       visible: [!!findCard(views[0]!, identity.source), !!findCard(views[1]!, identity.source)],
     };
   }
@@ -113,6 +119,7 @@ export class EffectContextObserver {
     const events = delegate();
     this.serial++;
     const after = this.game.decision;
+    this.dice.observe(before, input, events, after);
     const afterViews = [this.game.view(0), this.game.view(1)];
     const remaining = new Set(this.game.state.pending.map((p) => p.id));
     const visible = ([0, 1] as const).map((p) => {
@@ -142,10 +149,14 @@ export class EffectContextObserver {
     const played: Saved[] = [];
     const claimedPending = new Set<string>();
     const reportedRoots = new Set<Saved>();
+    let triggerCause: GameEvent | null = null;
     for (const event of events) {
+      // emit records an event then synchronously collects its triggers; abilityTriggered does not recurse.
+      if (event.type !== "abilityTriggered") triggerCause = event;
       if (event.type !== "abilityTriggered" && event.type !== "abilityPlayed") continue;
-      const saved = this.save({ controller: event.player, source: event.source, sourceDef: event.sourceDef, ability: event.ability,
-        ...(event.type === "abilityTriggered" ? { id: event.pendingId } : {}) }, afterViews);
+      const pending = event.type === "abilityTriggered" ? this.game.state.pending.find((p) => p.id === event.pendingId) : undefined;
+      const saved = this.save(pending ?? { controller: event.player, source: event.source, sourceDef: event.sourceDef, ability: event.ability,
+        ...(event.type === "abilityTriggered" ? { id: event.pendingId, event: triggerCause ?? undefined } : {}) }, afterViews);
       const delayed = [...delayedBefore.values()].find((s) => sameAbility(s.context, saved.context));
       if (delayed) {
         saved.context.sourceCard ??= delayed.context.sourceCard;
@@ -163,7 +174,9 @@ export class EffectContextObserver {
         // The previous instance can finish its cost just as another instance of the
         // very same ability starts. Claim its one play event before matching new pending IDs.
         const active = [root, prior].find((s): s is Saved => !!s && !s.played && !reportedRoots.has(s) && !!matchesPlayed(s, saved.context));
-        const original = active ?? [...candidates].find(([id, s]) => !remaining.has(id) && !claimedPending.has(id) && sameAbility(s.context, saved.context))?.[1] ?? null;
+        const chosen = input.type === "selectPending" ? candidates.get(input.id) : undefined;
+        const selected = chosen?.context.pendingId && !remaining.has(chosen.context.pendingId) && !claimedPending.has(chosen.context.pendingId) && sameAbility(chosen.context, saved.context) ? chosen : null;
+        const original = active ?? selected ?? [...candidates].find(([id, s]) => !remaining.has(id) && !claimedPending.has(id) && sameAbility(s.context, saved.context))?.[1] ?? null;
         if (active) reportedRoots.add(active);
         if (original?.context.pendingId) claimedPending.add(original.context.pendingId);
         saved.context.instanceId = `action:${this.serial}:ability:${played.length}`;

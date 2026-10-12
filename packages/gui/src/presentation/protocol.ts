@@ -19,10 +19,20 @@ export interface GameUpdate extends EngineUpdate {
   /** Local presentation only; optional for older GUI fixtures/messages. The host always supplies both. */
   pendingAbilities?: Record<string, AbilityDisplayContext>;
   effectContext?: AbilityDisplayContext | null;
+  diceSteps?: DiceStep[];
+  /** The real current reroll boundary, including bot/remote decisions hidden from this viewer. */
+  diePrompt?: DiePrompt | null;
 }
+
+export interface DiePrompt { key: string; player: PlayerId; result: number }
+export type DiceStep =
+  | { type: "throw"; key: string; player: PlayerId; result: number; reroll: boolean }
+  | ({ type: "prompt" } & DiePrompt)
+  | { type: "settled"; key: string; player: PlayerId; result: number };
 
 /** Identity is kept independently of language; the page resolves text when its card language changes. */
 export interface AbilityDisplayContext {
+  triggerDie?: { player: PlayerId; result: number };
   instanceId?: string;
   kind?: "automatic" | "activated" | "spell" | "cardPlay";
   pendingId?: string;

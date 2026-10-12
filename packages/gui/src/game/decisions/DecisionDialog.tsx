@@ -16,6 +16,7 @@ import { inDialog } from "../actions";
 import { locateAbilityText } from "../card/ability-text";
 import { displayAbilityHeading, displayAbilityText } from "../card/ability-display";
 import { AbilityPrompt } from "./AbilityPrompt";
+import { TriggerDie } from "./TriggerDie";
 import { CardTextLine, plainLine } from "../card/CardText";
 import { CardTile } from "../card/CardTile";
 import { setHighlight } from "../focus";
@@ -119,7 +120,7 @@ function SelectPending({ d, info, update, answer, busy }: FormProps<"selectPendi
         ? locateAbilityText(def, cardLang, timing, rank, count)
         : null;
     const provider = context?.providerDef ? t("decision.abilityProvider", { card: cardName(catalog.def(context.providerDef), cardLang) }) : null;
-    return { id, source, head, text, provider };
+    return { id, source, head, text, provider, die: context?.triggerDie };
   });
   return (
     <>
@@ -140,6 +141,7 @@ function SelectPending({ d, info, update, answer, busy }: FormProps<"selectPendi
                 {o.head}
                 {twins.length > 1 ? ` (${twins.indexOf(o) + 1})` : ""}
               </span>
+              <TriggerDie die={o.die} />
               {o.provider ? <span className="sve-ability-provider">{o.provider}</span> : null}
               {o.text ? <CardTextLine className="sve-pending-text" line={o.text.text} lang={o.text.lang} /> : null}
             </ActionButton>

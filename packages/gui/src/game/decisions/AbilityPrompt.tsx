@@ -8,6 +8,7 @@ import { displayAbilityHeading, displayAbilityText } from "../card/ability-displ
 import { CardTextLine } from "../card/CardText";
 import { scriptLabel } from "../options";
 import { setHighlight, showCard } from "../focus";
+import { TriggerDie } from "./TriggerDie";
 
 /** Both the dialog and table read exactly the context published for this decision. */
 export function AbilityPrompt({ update, compact = false }: { update: GameUpdate; compact?: boolean }) {
@@ -39,7 +40,7 @@ export function AbilityPrompt({ update, compact = false }: { update: GameUpdate;
     <div className={`sve-ability-context${compact ? " sve-ability-compact" : ""}`} data-testid={compact ? "table-ability" : "prompt-ability"}>
       {compact ? (
         <details key={context.instanceId ?? `${context.pendingId ?? context.sourceDef}:${context.abilityIndex}`}>
-          <summary onMouseEnter={highlight} onMouseLeave={() => setHighlight([])}>{processing}</summary>
+          <summary onMouseEnter={highlight} onMouseLeave={() => setHighlight([])}>{processing} <TriggerDie die={context.triggerDie} /></summary>
           <div className="sve-ability-expanded">{body}</div>
         </details>
       ) : (
@@ -47,6 +48,7 @@ export function AbilityPrompt({ update, compact = false }: { update: GameUpdate;
           <button type="button" className="sve-ability-heading" onMouseEnter={highlight} onMouseLeave={() => setHighlight([])} onClick={inspect}>
             {processing}
           </button>
+          <TriggerDie die={context.triggerDie} />
           {body}
         </>
       )}

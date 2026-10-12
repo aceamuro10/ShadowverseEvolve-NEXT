@@ -3,7 +3,7 @@
 // The options themselves always come from the decision (the GUI works out no rules).
 import { useSyncExternalStore } from "react";
 import type { Answer, CardId, ManualOp, PlayerId } from "@sve/core";
-import { engine } from "../app/store";
+import { engine, getApp, onBeforeUpdate } from "../app/store";
 import type { GameUpdate } from "../engine/protocol";
 import { setHighlight } from "./focus";
 
@@ -51,8 +51,8 @@ function set(change: Partial<InteractionState>): void {
 }
 
 /** Start afresh for a new decision (called when an update arrives). */
-export function resetInteraction(key: number): void {
-  if (state.key !== key) set({ key, menu: null, drag: null, chosen: [], sent: false, manual: state.manual, redrawing: false });
+export function resetInteraction(key: number, force = false): void {
+  if (state.key !== key || force) set({ key, menu: null, drag: null, chosen: [], sent: false, manual: force ? null : state.manual, redrawing: false });
 }
 
 /** A refused answer brings an error, not an update: the controls work again. */
@@ -82,6 +82,7 @@ export function useInteraction<T>(select: (s: InteractionState) => T): T {
 
 /** Send the person's answer to the pending decision (once; the controls wait for the reply). */
 export function sendAnswer(update: GameUpdate, answer: Answer): void {
+  if (getApp().diceBusy || getApp().update !== update || getApp().authoritative !== update) return;
   const info = update.decision;
   if (!info || state.sent || state.key !== update.inputCount) return;
   set({ sent: true, menu: null, drag: null });
@@ -94,6 +95,7 @@ export function sendAnswer(update: GameUpdate, answer: Answer): void {
  * whoever's it is. The window stays open for the next one.
  */
 export function sendManual(update: GameUpdate, op: ManualOp): void {
+  if (getApp().diceBusy || getApp().update !== update || getApp().authoritative !== update) return;
   if (!update.decision || state.sent || state.key !== update.inputCount) return;
   set({ sent: true, menu: null, drag: null });
   setHighlight([]);
@@ -101,7 +103,5 @@ export function sendManual(update: GameUpdate, op: ManualOp): void {
 }
 
 // Each update may bring a new decision; an error after an answer is the answer being refused.
-engine.subscribe((message) => {
-  if (message.kind === "update") resetInteraction(message.update.inputCount);
-  else if (message.kind === "error") answerRefused();
-});
+onBeforeUpdate((update) => resetInteraction(update.inputCount, update.logReset || !update.decision));
+engine.subscribe((message) => { if (message.kind === "error") answerRefused(); });

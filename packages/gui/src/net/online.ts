@@ -177,7 +177,7 @@ function disconnect(): void {
 
 /** Whether a game over the connection is being played (not over yet). */
 function playing(): boolean {
-  const update = getApp().update;
+  const update = getApp().authoritative;
   return getOnline().game !== null && update?.online != null && !update.result;
 }
 
@@ -252,7 +252,7 @@ function connected(role: "host" | "guest", peer: PeerLink): void {
     peer.send({ t: "watchers", n: watchers.length });
     describeRoom();
   }
-  if (going && game) peer.send({ t: "resume", game: game.id, have: getApp().update?.inputCount ?? 0 });
+  if (going && game) peer.send({ t: "resume", game: game.id, have: getApp().authoritative?.inputCount ?? 0 });
   startPinging(peer, lost);
 }
 
@@ -525,7 +525,7 @@ function endAsking(): void {
  * its player hasn't answered since), this person's answers waiting meanwhile. No answer within a while: nothing happens.
  */
 function requestUndo(): void {
-  const from = getApp().update?.online?.undo;
+  const from = getApp().authoritative?.online?.undo;
   const link = currentLink();
   if (from === null || from === undefined || !link || asking || getOnline().phase.kind !== "connected") return;
   engine.send({ kind: "hold", on: true });

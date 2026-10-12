@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useBack } from "../app/back";
 import { useCompact, useTouch } from "../app/compact";
-import { engine, useApp } from "../app/store";
+import { engine, setDiceScreenActive, useApp } from "../app/store";
 import type { GameUpdate } from "../engine/protocol";
 import { hostApi } from "../host/api";
 import { useT } from "../i18n";
 import { useOnline } from "../net/state";
 import { Chat } from "../online/Chat";
 import { AnimationLayer } from "./animation/AnimationLayer";
+import { DiceOverlay } from "./animation/DiceOverlay";
 import { Table } from "./board/Table";
 import { ZoneBrowser } from "./board/ZoneBrowser";
 import { CardDetails } from "./card/CardDetails";
@@ -36,6 +37,7 @@ interface Props {
  * like the sidebar: its button, or a long press on a card, opens it; the table takes the whole width.
  */
 export function GameScreen({ onMenu, onNewGame, onReplays, onOnline }: Props) {
+  useEffect(() => { setDiceScreenActive(true); return () => setDiceScreenActive(false); }, []);
   const update = useApp((s) => s.update);
   const t = useT();
   const [tab, setTab] = useState<Tab>("log");
@@ -142,6 +144,7 @@ export function GameScreen({ onMenu, onNewGame, onReplays, onOnline }: Props) {
       {online?.desync ? <Desync at={online.desync} /> : null}
       <ZoneBrowser update={update} />
       <AnimationLayer update={update} />
+      <DiceOverlay />
     </div>
   );
 }
