@@ -92,6 +92,7 @@ export async function answer(page: Page, kind: string, pick?: Pick): Promise<str
   const looked = page.getByTestId("looked-ok");
   if (await looked.isVisible()) await looked.click();
   if (kind === "announcement") return (await acknowledge(page), "OK");
+  if (kind === "handGain") return (await page.getByTestId("hand-gain-ok").click(), "OK");
   const click = async (id: string) => {
     const button = await tableButton(page, id);
     if (button) await button.click();

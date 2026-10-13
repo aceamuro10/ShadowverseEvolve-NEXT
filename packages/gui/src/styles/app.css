@@ -1590,6 +1590,49 @@ option {
   margin-top: 4px;
 }
 
+/* Public hand gains share the Quick frame; all instances stay inspectable, including duplicates. */
+.sve-hand-gain {
+  max-height: calc(100% - 64px);
+}
+.sve-hand-gain > :not(.sve-hand-gain-cards) {
+  flex-shrink: 0;
+}
+.sve-hand-gain-cards {
+  --sve-card-width: min(100px, calc((var(--side-width, 270px) - 54px) / 2));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 8px;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+}
+.sve-hand-gain-cards figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sve-hand-gain-cards figure:only-child {
+  grid-column: 1 / -1;
+}
+.sve-hand-gain-cards figcaption {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.sve-hand-gain-cards small {
+  color: var(--sve-muted);
+}
+.sve-hand-gain > button {
+  width: 100%;
+}
+
 /*
  * Cards one has just looked at (board/LookedCards.tsx; the top card of one's deck with nothing to take, or an ability that only
  * looks): the table waits under a light shade, the cards in the middle with their names and OK. Only the player who looked

@@ -8,7 +8,7 @@ import { useSettings } from "../../app/settings";
 import { useApp } from "../../app/store";
 import { findCard } from "../../engine/view-utils";
 import { useMemo, useRef, type CSSProperties, type ReactNode } from "react";
-import type { GameUpdate } from "../../engine/protocol";
+import type { GameUpdate } from "../../presentation/protocol";
 import { useT, type MessageKey } from "../../i18n";
 import { CardTile, type CardMark } from "../card/CardTile";
 import { DecisionDialog } from "../decisions/DecisionDialog";
@@ -16,6 +16,7 @@ import { actionsFor, answerFor, attackTargets, dragKind, openManual, openMenu, s
 import { ManualDialog } from "../manual/ManualDialog";
 import { LookedCards } from "./LookedCards";
 import { QuickAnnouncement } from "./QuickAnnouncement";
+import { HandGainAnnouncement } from "./HandGainAnnouncement";
 import { playerLabel } from "../labels";
 import { AttackArrow } from "./AttackArrow";
 import { CardMenu } from "./CardMenu";
@@ -431,6 +432,7 @@ export function Table({ update, onNewGame, onMenu, onReplays }: { update: GameUp
       <ManualDialog update={update} />
       <DecisionDialog key={update.inputCount} update={update} />
       <QuickAnnouncement update={update} />
+      <HandGainAnnouncement update={update} />
       <LookedCards update={update} />
       <TurnOrderNotice update={update} />
       <ResultOverlay update={update} onNewGame={onNewGame} onMenu={onMenu} onReplays={onReplays} />

@@ -3,9 +3,9 @@
 import { createEngine } from "@sve/core";
 import { ALL_CARDS, ALL_SCRIPTS } from "@sve/core/sets";
 import { timerScheduler } from "../engine/game-host";
-import type { CatalogCard, ToWorker } from "../engine/protocol";
+import type { CatalogCard } from "../engine/protocol";
 import { createPresentationHost } from "./host";
-import type { FromWorker } from "./protocol";
+import type { FromWorker, ToWorker } from "./protocol";
 
 interface WorkerScope {
   postMessage(message: FromWorker): void;

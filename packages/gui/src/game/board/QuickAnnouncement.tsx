@@ -18,6 +18,7 @@ import { cardLabel, playerLabel } from "../labels";
 import { optionText } from "../options";
 import { Arrow, cardCenter, type Point } from "./Arrow";
 import { useBack } from "../../app/back";
+import { AnnouncementFrame } from "./AnnouncementFrame";
 
 type GameUpdate = EngineUpdate & Pick<PresentationUpdate, "announcementIntroduced">;
 
@@ -96,8 +97,8 @@ function AnnouncementWindow({ update, announcement: a }: { update: GameUpdate; a
   // Watching a replay, it only tells: the playback goes on by itself, and the table's cards can still be pointed at.
   const watching = update.watch !== null;
   return (
-    <div className={`sve-announce-backdrop${watching ? " sve-announce-watch" : ""}`} onClick={(e) => e.stopPropagation()} data-testid="announcement">
-      <div className={`sve-announce ${own ? "sve-announce-own" : "sve-announce-opponent"}`} role="alertdialog" aria-labelledby="sve-announce-text">
+    <AnnouncementFrame own={own} watching={watching} testId="announcement" labelledBy="sve-announce-text"
+      overlay={arrows.map((arrow, i) => <Arrow key={i} from={arrow.from} to={arrow.to} variant="target" />)}>
         <div ref={cardRef} className="sve-announce-card">
           <CardTile info={a.card} />
         </div>
@@ -122,10 +123,6 @@ function AnnouncementWindow({ update, announcement: a }: { update: GameUpdate; a
             </button>
           )}
         </div>
-      </div>
-      {arrows.map((arrow, i) => (
-        <Arrow key={i} from={arrow.from} to={arrow.to} variant="target" />
-      ))}
-    </div>
+    </AnnouncementFrame>
   );
 }

@@ -3,6 +3,15 @@ import type { CardId, DefId, PlayerId } from "@sve/core";
 import type { CardInfo, LogEntry } from "../engine/protocol";
 import type { FromWorker as EngineMessage, GameUpdate as EngineUpdate } from "../engine/protocol";
 
+/** Page/worker only: never a rule input or an online message. */
+export type ToWorker = import("../engine/protocol").ToWorker | { kind: "handGainSeen"; key: string };
+
+export interface HandGainAnnouncement {
+  key: string;
+  player: PlayerId;
+  cards: { id: CardId; card: CardInfo; from: "deck" | "cemetery" | "banished" }[];
+}
+
 /** Additional presentation data for a visible instance. Type, stats and gifts remain in CardView. */
 export interface CardRuntimeDetails {
   /** Current normal play PP, only for visible hand/EX instances (0 is a valid value). */
@@ -14,6 +23,8 @@ export interface CardRuntimeDetails {
 }
 
 export interface GameUpdate extends EngineUpdate {
+  /** Actual cards added to hand whose identities are public to both players. */
+  handGain?: HandGainAnnouncement | null;
   /** Computed synchronously from the session and the final visible view being sent. */
   cardDetails: Record<CardId, CardRuntimeDetails>;
   /** Local presentation only; optional for older GUI fixtures/messages. The host always supplies both. */
@@ -61,6 +72,6 @@ export interface AbilityDisplayContext {
   playOptionLabel?: string;
 }
 
-export type AbilityUpdate = EngineUpdate & Pick<GameUpdate, "pendingAbilities" | "effectContext">;
+export type AbilityUpdate = EngineUpdate & Pick<GameUpdate, "pendingAbilities" | "effectContext" | "handGain">;
 
 export type FromWorker = Exclude<EngineMessage, { kind: "update" }> | { kind: "update"; update: GameUpdate };

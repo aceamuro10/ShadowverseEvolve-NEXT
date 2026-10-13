@@ -461,7 +461,7 @@ describe("presentation ability identity and live input observation", () => {
       expect(b.replay()).toEqual(a.replay());
       expect(presented.map((m) => {
         if (m.kind !== "update") return m;
-        const { cardDetails, pendingAbilities, effectContext, diceSteps, diePrompt, ...update } = m.update;
+        const { cardDetails, pendingAbilities, effectContext, diceSteps, diePrompt, handGain, ...update } = m.update;
         return { kind: "update", update };
       })).toEqual(plain);
     };
