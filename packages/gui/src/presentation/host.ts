@@ -18,7 +18,7 @@ export function createPresentationHost(
   const observed = observePresentationEngine(engine);
   let displayUntil = 0;
   // Automatic bot/replay progression leaves room for serial playback. Actual dialog release still
-  // depends on the page's animation completion, and remote inputs remain immediate.
+  // depends on the page's animation completion. Hand-gain notices never participate in scheduling.
   const paced: Scheduler = { schedule: (fn, ms) => scheduler.schedule(fn, Math.max(ms, displayUntil - Date.now())) };
   // GameHost's constructor does not publish. Every update is sent synchronously with an active session.
   const host = new GameHost(observed.engine, (message) => {
@@ -34,7 +34,8 @@ export function createPresentationHost(
       const budget = diceSteps.reduce((ms, step) => ms + (step.type === "throw" ? throwBudget : step.type === "prompt" ? DICE_TIMING.inquiry : 0), 0);
       if (budget) displayUntil = Math.max(displayUntil, Date.now()) + budget;
     }
-    send({ ...message, update: { ...message.update, cardDetails, ...abilities, diceSteps, diePrompt: observer.dice.prompt } });
+    send({ kind: "update", update: { ...message.update, cardDetails, ...abilities, diceSteps, diePrompt: observer.dice.prompt,
+      handGains: observer.handGains.drain(message.update.logReset) } });
   }, paced, options);
   return host;
 }

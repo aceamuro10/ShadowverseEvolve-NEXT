@@ -5,6 +5,7 @@ import { findCard, forEachCard } from "../engine/view-utils";
 import { abilitySource } from "./ability-source";
 import type { AbilityDisplayContext } from "./protocol";
 import { DiceObserver } from "./dice-observer";
+import { HandGainObserver } from "./hand-gain-observer";
 
 interface Saved {
   context: AbilityDisplayContext;
@@ -39,6 +40,7 @@ export class EffectContextObserver {
   private delayed = new Map<string, Saved>();
   private serial = 0;
   readonly dice: DiceObserver;
+  readonly handGains = new HandGainObserver();
 
   constructor(private readonly engine: Engine, private readonly game: GameSession) {
     this.dice = new DiceObserver(game.startupEvents, game.decision);
@@ -105,6 +107,7 @@ export class EffectContextObserver {
   /** Commit only after the original act succeeds. A rejected input leaves the prior context intact. */
   act(input: Input, from: PlayerId | undefined, delegate: () => GameEvent[]): GameEvent[] {
     const before = this.game.decision;
+    const revealedBefore = [...this.game.state.revealed];
     const beforeViews = [this.game.view(0), this.game.view(1)];
     const candidates = new Map(this.game.state.pending.map((p) => [p.id, this.waiting.get(p.id) ?? this.save(p, beforeViews)]));
     const delayedBefore = new Map(this.game.state.delayed.map((d) => [d.id, this.delayed.get(d.id) ?? this.save({ ...d, source: d.source ?? "" }, beforeViews)]));
@@ -117,6 +120,7 @@ export class EffectContextObserver {
       prior = { ...prior, context: { ...prior.context, ...selection } };
     }
     const events = delegate();
+    this.handGains.observe(events, revealedBefore, { type: input.type, player: from ?? before?.player ?? null });
     this.serial++;
     const after = this.game.decision;
     this.dice.observe(before, input, events, after);

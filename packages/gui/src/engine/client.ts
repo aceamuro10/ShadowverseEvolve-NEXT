@@ -1,8 +1,8 @@
 // The GUI side of the engine worker: sends messages and hands the worker's messages to subscribers. Requests that expect a
 // reply (a replay, a deck check) carry an id.
 import type { DeckList } from "@sve/core";
-import type { Replay, ToWorker } from "./protocol";
-import type { FromWorker } from "../presentation/protocol";
+import type { Replay } from "./protocol";
+import type { FromWorker, ToWorker } from "../presentation/protocol";
 
 type Listener = (message: FromWorker) => void;
 
