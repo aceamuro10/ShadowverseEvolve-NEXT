@@ -24,7 +24,7 @@ export class HandGainDisplay {
     if (update.logReset || update.result || update.announcement || choosingTarget || decision?.type === "quick") {
       this.clear(false);
     } else {
-      this.queue.push(...(update.handGains ?? []));
+      this.queue.push(...(update.handGains ?? []).filter((gain) => gain.operator !== update.perspective));
       if (!this.current) this.next(false);
     }
     return this.current;

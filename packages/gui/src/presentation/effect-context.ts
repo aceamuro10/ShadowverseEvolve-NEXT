@@ -120,7 +120,7 @@ export class EffectContextObserver {
       prior = { ...prior, context: { ...prior.context, ...selection } };
     }
     const events = delegate();
-    this.handGains.observe(events, revealedBefore);
+    this.handGains.observe(events, revealedBefore, { type: input.type, player: from ?? before?.player ?? null });
     this.serial++;
     const after = this.game.decision;
     this.dice.observe(before, input, events, after);

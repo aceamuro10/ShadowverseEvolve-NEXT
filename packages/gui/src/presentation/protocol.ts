@@ -7,6 +7,9 @@ export type ToWorker = import("../engine/protocol").ToWorker;
 
 export interface HandGainAnnouncement {
   key: string;
+  /** The player who initiated the operation, independent of the destination hand or later choices. */
+  operator: PlayerId | null;
+  /** The recipient, used only to describe the cards' destination. */
   player: PlayerId;
   cards: { id: CardId; card: CardInfo; from: "deck" | "cemetery" | "banished" }[];
 }

@@ -1,4 +1,4 @@
-import type { CardId, CardMove, GameEvent, PlayerId } from "@sve/core";
+import type { CardId, CardMove, GameEvent, Input, PlayerId } from "@sve/core";
 import type { HandGainAnnouncement } from "./protocol";
 
 let sessionSerial = 0;
@@ -8,8 +8,14 @@ export class HandGainObserver {
   private readonly prefix = `hand-gain:${++sessionSerial}`;
   private serial = 0;
   private pending: HandGainAnnouncement[] = [];
+  private operator: PlayerId | null = null;
 
-  observe(events: readonly GameEvent[], alreadyRevealed: readonly CardId[]): void {
+  observe(events: readonly GameEvent[], alreadyRevealed: readonly CardId[], operation?: { type: Input["type"]; player: PlayerId | null }): void {
+    // Selections/confirmations may be answered by the other player. Keep the initiator until
+    // a new main action, Quick action or pending-ability resolution starts.
+    if (operation && (this.operator === null || operation.type === "mainPhase" || operation.type === "quick" || operation.type === "selectPending")) {
+      this.operator = operation.player;
+    }
     const revealed = new Set(alreadyRevealed);
     const hidden = new Map<CardId, CardMove>();
     const groups = new Map<PlayerId, HandGainAnnouncement>();
@@ -17,7 +23,7 @@ export class HandGainObserver {
       if (!move.newCard || !move.def || !move.from) return;
       let group = groups.get(move.to.player);
       if (!group) {
-        group = { key: `${this.prefix}:${++this.serial}`, player: move.to.player, cards: [] };
+        group = { key: `${this.prefix}:${++this.serial}`, operator: this.operator, player: move.to.player, cards: [] };
         groups.set(move.to.player, group);
       }
       group.cards.push({ id: move.newCard, card: { def: move.def, printing: move.printing || null },

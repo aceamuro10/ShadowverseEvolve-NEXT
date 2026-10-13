@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { HandGainDisplay, HAND_GAIN_DURATION_MS } from "../src/presentation/hand-gain-display";
 import type { GameUpdate, HandGainAnnouncement } from "../src/presentation/protocol";
 
-const gain = (key: string): HandGainAnnouncement => ({ key, player: 0, cards: [{ id: key, card: { def: "X", printing: null }, from: "deck" }] });
+const gain = (key: string): HandGainAnnouncement => ({ key, operator: 1, player: 0, cards: [{ id: key, card: { def: "X", printing: null }, from: "deck" }] });
 const update = (extra: Partial<GameUpdate> = {}) => ({ seed: "game", perspective: 0, logReset: false,
   announcement: null, result: null, decision: null, handGains: [], ...extra }) as GameUpdate;
 
