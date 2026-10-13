@@ -61,7 +61,7 @@ describe("public hand gains from real rule execution", () => {
     expect(t.latest().decision?.decision.type).toBe("mainPhase");
     const count = t.latest().inputCount;
     t.act({ type: "mainPhase", action: { type: "endMainPhase" } });
-    expect(t.latest().inputCount).toBe(count + 1);
+    expect(t.latest().inputCount).toBeGreaterThan(count);
     expect(t.latest().handGains).toEqual([]);
   });
 

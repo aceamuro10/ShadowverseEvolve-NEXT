@@ -1,5 +1,5 @@
 // Local worker-to-page presentation extensions. Keep engine/protocol.ts unchanged: it is fingerprinted.
-import type { CardId, DefId, PlayerId } from "@sve/core";
+import type { CardId, DefId, PlayerId, ZoneName } from "@sve/core";
 import type { CardInfo, LogEntry } from "../engine/protocol";
 import type { FromWorker as EngineMessage, GameUpdate as EngineUpdate } from "../engine/protocol";
 
@@ -11,7 +11,8 @@ export interface HandGainAnnouncement {
   operator: PlayerId | null;
   /** The recipient, used only to describe the cards' destination. */
   player: PlayerId;
-  cards: { id: CardId; card: CardInfo; from: "deck" | "cemetery" | "banished" }[];
+  to: "hand" | "deck" | "evolveDeck";
+  cards: { id: CardId; card: CardInfo; from: ZoneName }[];
 }
 
 /** Additional presentation data for a visible instance. Type, stats and gifts remain in CardView. */
@@ -25,7 +26,7 @@ export interface CardRuntimeDetails {
 }
 
 export interface GameUpdate extends EngineUpdate {
-  /** One-shot public hand gains from this publication; their display is owned entirely by the page. */
+  /** One-shot public cards entering hidden zones; their display is owned entirely by the page. */
   handGains?: HandGainAnnouncement[];
   /** Computed synchronously from the session and the final visible view being sent. */
   cardDetails: Record<CardId, CardRuntimeDetails>;

@@ -5,7 +5,7 @@ import { findCard, forEachCard } from "../engine/view-utils";
 import { abilitySource } from "./ability-source";
 import type { AbilityDisplayContext } from "./protocol";
 import { DiceObserver } from "./dice-observer";
-import { HandGainObserver } from "./hand-gain-observer";
+import { HandGainObserver, type FaceUpEvolveCard } from "./hand-gain-observer";
 
 interface Saved {
   context: AbilityDisplayContext;
@@ -108,6 +108,12 @@ export class EffectContextObserver {
   act(input: Input, from: PlayerId | undefined, delegate: () => GameEvent[]): GameEvent[] {
     const before = this.game.decision;
     const revealedBefore = [...this.game.state.revealed];
+    // turnFacedown mutates the existing evolve-deck instance without emitting an event.
+    // Snapshot only cards already faceup, so no hidden identity is inferred from an owner/debug view.
+    const evolveBefore: FaceUpEvolveCard[] = this.game.state.players.flatMap((player) => player.zones.evolveDeck.flatMap((id) => {
+      const card = this.game.state.cards[id]!;
+      return card.faceUp ? [{ id, def: card.def, printing: card.printing, controller: card.controller }] : [];
+    }));
     const beforeViews = [this.game.view(0), this.game.view(1)];
     const candidates = new Map(this.game.state.pending.map((p) => [p.id, this.waiting.get(p.id) ?? this.save(p, beforeViews)]));
     const delayedBefore = new Map(this.game.state.delayed.map((d) => [d.id, this.delayed.get(d.id) ?? this.save({ ...d, source: d.source ?? "" }, beforeViews)]));
@@ -120,7 +126,11 @@ export class EffectContextObserver {
       prior = { ...prior, context: { ...prior.context, ...selection } };
     }
     const events = delegate();
-    this.handGains.observe(events, revealedBefore, { type: input.type, player: from ?? before?.player ?? null });
+    const turnedFacedown = evolveBefore.filter(({ id }) => {
+      const card = this.game.state.cards[id];
+      return card?.zone === "evolveDeck" && !card.faceUp;
+    });
+    this.handGains.observe(events, revealedBefore, { type: input.type, player: from ?? before?.player ?? null }, turnedFacedown);
     this.serial++;
     const after = this.game.decision;
     this.dice.observe(before, input, events, after);
