@@ -1590,7 +1590,7 @@ option {
   margin-top: 4px;
 }
 
-/* Public hand gains share the Quick frame; all instances stay inspectable, including duplicates. */
+/* A standalone, nonmodal notice: only its own panel receives pointer events. */
 .sve-hand-gain {
   max-height: calc(100% - 64px);
 }

@@ -3,8 +3,7 @@ import type { CardId, DefId, PlayerId } from "@sve/core";
 import type { CardInfo, LogEntry } from "../engine/protocol";
 import type { FromWorker as EngineMessage, GameUpdate as EngineUpdate } from "../engine/protocol";
 
-/** Page/worker only: never a rule input or an online message. */
-export type ToWorker = import("../engine/protocol").ToWorker | { kind: "handGainSeen"; key: string };
+export type ToWorker = import("../engine/protocol").ToWorker;
 
 export interface HandGainAnnouncement {
   key: string;
@@ -23,8 +22,8 @@ export interface CardRuntimeDetails {
 }
 
 export interface GameUpdate extends EngineUpdate {
-  /** Actual cards added to hand whose identities are public to both players. */
-  handGain?: HandGainAnnouncement | null;
+  /** One-shot public hand gains from this publication; their display is owned entirely by the page. */
+  handGains?: HandGainAnnouncement[];
   /** Computed synchronously from the session and the final visible view being sent. */
   cardDetails: Record<CardId, CardRuntimeDetails>;
   /** Local presentation only; optional for older GUI fixtures/messages. The host always supplies both. */
@@ -72,6 +71,6 @@ export interface AbilityDisplayContext {
   playOptionLabel?: string;
 }
 
-export type AbilityUpdate = EngineUpdate & Pick<GameUpdate, "pendingAbilities" | "effectContext" | "handGain">;
+export type AbilityUpdate = EngineUpdate & Pick<GameUpdate, "pendingAbilities" | "effectContext">;
 
 export type FromWorker = Exclude<EngineMessage, { kind: "update" }> | { kind: "update"; update: GameUpdate };

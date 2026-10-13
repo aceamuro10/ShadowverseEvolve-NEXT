@@ -34,7 +34,7 @@ function setup(def = "SEARCH", scheduler: Scheduler = { schedule: vi.fn(() => ()
     expect(b.session!.decision).toEqual(a.session!.decision);
     expect(messages.filter((m) => m.kind === "error")).toEqual([]);
   };
-  const send = (m: Exclude<ToWorker, { kind: "handGainSeen" }>) => { a.handle(m); b.handle(m); equal(); };
+  const send = (m: ToWorker) => { a.handle(m); b.handle(m); equal(); };
   const act = (answer: Answer) => send({ kind: "answer", seat: a.session!.decision!.player, answer });
   const manual = (op: import("@sve/core").ManualOp) => act({ type: "mainPhase", action: { type: "manual", op } });
   send({ kind: "start", options });
@@ -49,75 +49,67 @@ function setup(def = "SEARCH", scheduler: Scheduler = { schedule: vi.fn(() => ()
     if (d.type !== "selectCards") throw new Error(`Expected cards, got ${d.type}`);
     act({ type: "selectCards", cards: d.candidates.slice(0, n) });
   };
-  const seen = () => { b.handle({ kind: "handGainSeen", key: latest().handGain!.key }); equal(); };
-  return { a, b, latest, options, messages, send, act, manual, activate, pick, seen, equal };
+  return { a, b, latest, options, messages, send, act, manual, activate, pick, equal };
 }
 
 describe("public hand gains from real rule execution", () => {
-  it("shows both identical search results, pauses local controls, and acknowledges without any rule input", () => {
+  it("publishes both identical search results without pausing local controls", () => {
     const t = setup(); t.activate(); t.pick(2);
-    const gain = t.latest().handGain!;
+    const gain = t.latest().handGains![0]!;
     expect(gain.cards.map((c) => [c.card.def, c.from])).toEqual([["TARGET", "deck"], ["TARGET", "deck"]]);
     expect(new Set(gain.cards.map((c) => c.id)).size).toBe(2);
-    expect(t.latest().decision).toBeNull();
-    const replay = t.b.replay();
-    t.b.handle({ kind: "answer", seat: 0, answer: { type: "mainPhase", action: { type: "endMainPhase" } } });
-    t.b.handle({ kind: "handGainSeen", key: "stale" });
-    expect(t.latest().handGain).toEqual(gain);
-    expect(t.b.replay()).toEqual(replay);
-    t.seen();
-    expect(t.latest().handGain).toBeNull();
     expect(t.latest().decision?.decision.type).toBe("mainPhase");
-    expect(t.latest().log).toEqual([]);
-    expect(t.b.replay()).toEqual(replay);
+    const count = t.latest().inputCount;
+    t.act({ type: "mainPhase", action: { type: "endMainPhase" } });
+    expect(t.latest().inputCount).toBe(count + 1);
+    expect(t.latest().handGains).toEqual([]);
   });
 
   it("never promotes private searches or looked-at cards to public, even with revealAll enabled", () => {
     for (const def of ["SECRET", "LOOK"]) {
       const t = setup(def); t.send({ kind: "settings", settings: { revealAll: true } });
       t.activate(); if (def === "SECRET") t.pick(1);
-      expect(t.latest().handGain).toBeNull();
+      expect(t.latest().handGains).toEqual([]);
     }
   });
 
   it("remembers an actual reveal across a destination choice, but shows only cards actually put in hand", () => {
     for (const accept of [true, false]) {
       const t = setup("CROSS"); t.activate(); t.pick(1);
-      expect(t.latest().handGain).toBeNull();
+      expect(t.latest().handGains).toEqual([]);
       expect(t.a.session!.decision?.type).toBe("confirm");
       t.act({ type: "confirm", yes: accept });
-      expect(t.latest().handGain?.cards.length ?? 0).toBe(accept ? 1 : 0);
+      expect(t.latest().handGains?.[0]?.cards.length ?? 0).toBe(accept ? 1 : 0);
     }
   });
 
   it("handles explicit reveal after moving to hand and empty searches", () => {
     const t = setup("POST"); t.activate();
-    expect(t.latest().handGain?.cards).toHaveLength(1);
+    expect(t.latest().handGains?.[0]?.cards).toHaveLength(1);
     const empty = setup(); empty.activate(); empty.pick(0);
-    expect(empty.latest().handGain).toBeNull();
+    expect(empty.latest().handGains).toEqual([]);
   });
 
   it.each(["cemetery", "banished"] as const)("recovers public cards from %s, excluding direct manual moves", (zone) => {
     const t = setup(zone === "cemetery" ? "RECOVER" : "BANISH");
     const card = Object.values(t.a.session!.state.cards).find((c) => c.owner === 0 && c.zone === "hand")!;
     t.manual({ kind: "move", card: card.id, to: zone });
-    expect(t.latest().handGain).toBeNull();
+    expect(t.latest().handGains).toEqual([]);
     t.activate();
-    expect(t.latest().handGain?.cards.map((c) => c.from)).toEqual([zone]);
-    t.seen();
+    expect(t.latest().handGains?.[0]?.cards.map((c) => c.from)).toEqual([zone]);
   });
 
   it("does not replay old notices on rewind/load and continues to observe future real inputs", () => {
     const t = setup(); t.activate(); t.pick(2);
     const replay = t.a.replay()!;
     t.send({ kind: "rewind", inputs: replay.inputs.length });
-    expect(t.latest().handGain).toBeNull();
+    expect(t.latest().handGains).toEqual([]);
     expect(t.latest().logReset).toBe(true);
     t.activate(); t.pick(1);
-    expect(t.latest().handGain?.cards).toHaveLength(1);
+    expect(t.latest().handGains?.[0]?.cards).toHaveLength(1);
   });
 
-  it("shows Quick resolution first, then its complete public search result without extra inputs", () => {
+  it("publishes search events alongside Quick without synthesizing any acknowledgements", () => {
     const t = setup("QUICK");
     t.send({ kind: "settings", settings: { announceQuick: true } });
     t.act({ type: "mainPhase", action: { type: "endMainPhase" } });
@@ -127,16 +119,15 @@ describe("public hand gains from real rule execution", () => {
     t.act({ type: "quick", action: d.actions.find((a) => a.type === "activate")! });
     t.pick(2);
     expect(t.latest().announcement).not.toBeNull();
-    expect(t.latest().handGain).toBeNull();
+    expect(t.latest().handGains?.[0]?.cards).toHaveLength(2);
     const count = t.latest().inputCount;
     t.send({ kind: "acknowledge", seq: t.latest().announcement!.seq });
     expect(t.latest().announcement).toBeNull();
-    expect(t.latest().handGain?.cards).toHaveLength(2);
-    t.seen();
+    expect(t.latest().handGains).toEqual([]);
     expect(t.latest().inputCount).toBe(count);
   });
 
-  it("queues a later remote answer until the local reveal is seen, without desynchronizing", () => {
+  it("applies later remote answers immediately without waiting for local notices", () => {
     const t = setup(); t.activate(); t.pick(2);
     const prefix = t.a.replay()!.inputs;
     const peer: FromWorker[] = [];
@@ -146,19 +137,17 @@ describe("public hand gains from real rule execution", () => {
     const pickInput = prefix.at(-1)!.input;
     const beforePick = stateHash(remote.session!.state);
     remote.handle({ kind: "remoteInput", index: prefix.length - 1, input: pickInput, hash: beforePick });
-    const key = last().handGain!.key;
+    expect(last().handGains?.[0]?.cards).toHaveLength(2);
     const nextHash = stateHash(t.a.session!.state);
     const next: Answer = { type: "mainPhase", action: { type: "endMainPhase" } };
     t.a.handle({ kind: "answer", seat: 0, answer: next });
     remote.handle({ kind: "remoteInput", index: prefix.length, input: next, hash: nextHash });
-    expect(last().inputCount).toBe(prefix.length);
-    remote.handle({ kind: "handGainSeen", key });
     expect(last().inputCount).toBe(t.a.replay()!.inputs.length);
     expect(last().online?.desync).toBeNull();
     expect(stateHash(remote.session!.state)).toBe(stateHash(t.a.session!.state));
   });
 
-  it("stepping a real replay through a Quick search releases its summary and then shows the cards", () => {
+  it("keeps a stepped replay's original Quick acknowledgement behavior", () => {
     vi.useFakeTimers();
     try {
       const t = setup("QUICK", { schedule(fn, ms) { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); } });
@@ -175,13 +164,13 @@ describe("public hand gains from real rule execution", () => {
       t.send({ kind: "watchControl", step: 1 });
       t.send({ kind: "watchControl", step: 1 });
       expect(t.latest().announcement).not.toBeNull();
-      expect(t.latest().handGain).toBeNull();
+      expect(t.latest().handGains?.[0]?.cards).toHaveLength(2);
       const count = t.latest().inputCount;
       vi.advanceTimersByTime(1800);
-      expect(t.latest().announcement).toBeNull();
-      expect(t.latest().handGain?.cards).toHaveLength(2);
+      expect(t.latest().announcement).not.toBeNull();
       expect(t.latest().inputCount).toBe(count);
-      t.seen();
+      t.send({ kind: "acknowledge", seq: t.latest().announcement!.seq });
+      expect(t.latest().handGains).toEqual([]);
     } finally { vi.useRealTimers(); }
   });
 });

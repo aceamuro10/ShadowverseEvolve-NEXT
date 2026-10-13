@@ -46,7 +46,7 @@ async function pick(page: Page, n: number) {
   }, n);
 }
 
-test("a real two-card search displays both copies, supports hover and keyboard confirmation, and fits a small screen", async ({ page }) => {
+test("a real two-card search displays both copies without pausing controls, and fits a small screen", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await prepare(page);
   await manual(page, "search", "BP02-031");
@@ -63,8 +63,8 @@ test("a real two-card search displays both copies, supports hover and keyboard c
   await page.getByTestId("hand-gain-card").first().hover();
   await page.screenshot({ path: test.info().outputPath("hand-gain-desktop.png") });
   await page.setViewportSize({ width: 844, height: 390 });
-  await expect(page.getByTestId("hand-gain-ok")).toBeInViewport();
-  const fits = await notice.locator(".sve-hand-gain").evaluate((el) => {
+  await expect(page.getByTestId("hand-gain-close")).toBeInViewport();
+  const fits = await notice.evaluate((el) => {
     const r = el.getBoundingClientRect();
     return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
   });
@@ -72,10 +72,11 @@ test("a real two-card search displays both copies, supports hover and keyboard c
   await page.screenshot({ path: test.info().outputPath("hand-gain-small.png") });
   await page.waitForTimeout(200);
   await expect(page.locator(".sve-decision")).toHaveAttribute("data-inputs", inputs!);
-  await page.keyboard.press("Escape");
+  await page.getByTestId("table-end").click();
+  await expect(page.locator(".sve-decision")).not.toHaveAttribute("data-inputs", inputs!);
+  // A newly opened Quick window may already have dismissed the notice.
+  if (await notice.isVisible()) await page.getByTestId("hand-gain-close").click();
   await expect(notice).toHaveCount(0);
-  await expect(page.locator(".sve-decision")).toHaveAttribute("data-decision", "mainPhase");
-  await expect(page.locator(".sve-decision")).toHaveAttribute("data-inputs", inputs!);
   expect(errors).toEqual([]);
 });
 
@@ -88,21 +89,21 @@ test("Tart Man's number-only deck search does not reveal the selected card", asy
   await expect(page.getByTestId("hand-gain")).toHaveCount(0);
 });
 
-test("six publicly revealed cards stay scrollable on a small screen and Enter confirms once", async ({ page }) => {
+test("six publicly revealed cards stay scrollable on a small screen and close locally", async ({ page }) => {
   await prepare(page);
   await page.setViewportSize({ width: 844, height: 390 });
   await manual(page, "search", "CP01-080");
   await manual(page, "play", "CP01-080");
   await expect(page.getByTestId("hand-gain")).toBeVisible();
   await expect(page.getByTestId("hand-gain-card")).toHaveCount(6);
-  await expect(page.getByTestId("hand-gain-ok")).toBeInViewport();
+  await expect(page.getByTestId("hand-gain-close")).toBeInViewport();
   const gallery = page.locator(".sve-hand-gain-cards");
   expect(await gallery.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
   await gallery.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect(page.getByTestId("hand-gain-card").last()).toBeInViewport();
   await page.screenshot({ path: test.info().outputPath("hand-gain-six-small.png") });
   const inputs = await page.locator(".sve-decision").getAttribute("data-inputs");
-  await page.keyboard.press("Enter");
+  await page.getByTestId("hand-gain-close").click();
   await expect(page.getByTestId("hand-gain")).toHaveCount(0);
   await expect(page.locator(".sve-decision")).toHaveAttribute("data-inputs", inputs!);
 });

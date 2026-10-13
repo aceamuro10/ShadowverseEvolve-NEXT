@@ -1,14 +1,15 @@
 // The app's state: what the engine worker published (catalog, the game's latest update, the log) and the errors to show.
-// Components read it with useApp(select); only the worker's messages change it.
+// Components read it with useApp(select); cosmetic notifications have their own local lifetime.
 import { useSyncExternalStore } from "react";
 import { EngineClient } from "../engine/client";
 import type { LogEntry } from "../engine/protocol";
-import type { GameUpdate } from "../presentation/protocol";
+import type { GameUpdate, HandGainAnnouncement } from "../presentation/protocol";
 import { playUpdateSounds } from "../resources/sound";
 import { Catalog } from "./catalog";
 import { getSettings } from "./settings";
 import { DicePlayback, type DiceFrame } from "../presentation/dice-playback";
 import { tableAnimations } from "../presentation/animation-barrier";
+import { HandGainDisplay } from "../presentation/hand-gain-display";
 
 export interface AppError {
   id: number;
@@ -26,9 +27,10 @@ export interface AppState {
   authoritative: GameUpdate | null;
   dice: DiceFrame | null;
   diceBusy: boolean;
+  handGain: HandGainAnnouncement | null;
 }
 
-let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false };
+let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null };
 const listeners = new Set<() => void>();
 
 /** The state now, outside React (online play reads how far the game is). */
@@ -43,6 +45,12 @@ function setState(change: Partial<AppState>): void {
 
 /** The engine worker (one for the whole app). */
 export const engine = new EngineClient();
+const handGains = new HandGainDisplay((handGain) => setState({ handGain }));
+
+/** Closing a notice is entirely local; it sends no worker or online message. */
+export function dismissHandGain(key: string): void {
+  handGains.dismiss(key);
+}
 
 let nextError = 1;
 
@@ -60,13 +68,14 @@ function publishUpdate(update: GameUpdate, interactive: boolean, appendLog = tru
   for (const fn of beforeUpdate) fn(update);
   playUpdateSounds({ ...update, log: update.animationLog ?? update.log }, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
   const allowed = interactive && update === state.authoritative;
-  setState({ update: allowed ? update : { ...update, decision: null, manual: null, announcement: null, looked: null, handGain: null },
+  setState({ update: allowed ? update : { ...update, decision: null, manual: null, announcement: null, looked: null },
+    ...(appendLog ? { handGain: handGains.publish(update) } : {}),
     log: appendLog ? update.logReset ? update.log : [...state.log, ...update.log] : state.log, diceBusy: !allowed });
 }
 
 export const dicePlayback = new DicePlayback({
   block: () => {
-    const update = state.update ? { ...state.update, decision: null, manual: null, announcement: null, looked: null, handGain: null, effectContext: null, log: [], animationLog: [], animationKey: undefined } : null;
+    const update = state.update ? { ...state.update, decision: null, manual: null, announcement: null, looked: null, effectContext: null, log: [], animationLog: [], animationKey: undefined } : null;
     if (update) for (const fn of beforeUpdate) fn(update);
     setState({ diceBusy: true, ...(update ? { update } : {}) });
   },
@@ -74,7 +83,7 @@ export const dicePlayback = new DicePlayback({
   publish: publishUpdate,
   idle: () => setState({ diceBusy: false }),
   animate: (update, entries, done) => {
-    publishUpdate({ ...update, log: [], animationLog: entries, effectContext: null, decision: null, manual: null, announcement: null, looked: null, handGain: null }, false, false);
+    publishUpdate({ ...update, log: [], animationLog: entries, effectContext: null, decision: null, manual: null, announcement: null, looked: null }, false, false);
     void tableAnimations.wait().then(done);
   },
   waitForAnimations: (done) => { void tableAnimations.wait().then(done); },
@@ -84,7 +93,10 @@ export const dicePlayback = new DicePlayback({
 let diceScreenActive = false;
 export function setDiceScreenActive(active: boolean): void {
   diceScreenActive = active;
-  if (!active) dicePlayback.flush();
+  if (!active) {
+    dicePlayback.flush();
+    handGains.clear();
+  }
 }
 
 engine.subscribe((message) => {
