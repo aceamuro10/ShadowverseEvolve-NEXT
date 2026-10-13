@@ -9,17 +9,21 @@ const update = (extra: Partial<GameUpdate> = {}) => ({ seed: "game", perspective
 afterEach(() => vi.useRealTimers());
 
 describe("page-local hand gain notices", () => {
-  it("expires each notice without waiting for an answer or resetting its lifetime on routine updates", () => {
+  it("replaces the current result immediately and starts a fresh lifetime", () => {
     vi.useFakeTimers();
     const changed = vi.fn();
     const display = new HandGainDisplay(changed);
-    expect(display.publish(update({ handGains: [gain("1"), gain("2")] }))?.key).toBe("1");
+    expect(display.publish(update({ handGains: [gain("1")] }))?.key).toBe("1");
     vi.advanceTimersByTime(HAND_GAIN_DURATION_MS - 1);
     expect(display.publish(update())?.key).toBe("1");
+    expect(display.publish(update({ handGains: [gain("2"), gain("3")] }))?.key).toBe("3");
     vi.advanceTimersByTime(1);
-    expect(changed).toHaveBeenLastCalledWith(gain("2"));
+    expect(changed).not.toHaveBeenCalled();
+    expect(display.publish(update())?.key).toBe("3");
+    vi.advanceTimersByTime(HAND_GAIN_DURATION_MS - 1);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null);
     vi.advanceTimersByTime(HAND_GAIN_DURATION_MS);
-    expect(changed).toHaveBeenLastCalledWith(null);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null);
   });
 
   it.each([
@@ -29,7 +33,7 @@ describe("page-local hand gain notices", () => {
     { logReset: true },
     { seed: "new-game" },
     { perspective: 1 },
-  ])("discards the whole queue on interruption: %j", (extra) => {
+  ])("discards the current notice on interruption: %j", (extra) => {
     vi.useFakeTimers();
     const changed = vi.fn();
     const display = new HandGainDisplay(changed);
@@ -56,6 +60,8 @@ describe("page-local hand gain notices", () => {
     display.dismiss("stale");
     expect(changed).not.toHaveBeenCalled();
     display.dismiss("1");
+    expect(changed).not.toHaveBeenCalled();
+    display.dismiss("2");
     expect(changed).toHaveBeenCalledExactlyOnceWith(null);
     vi.runAllTimers();
     expect(display.publish(update())).toBeNull();

@@ -4,7 +4,6 @@ import type { GameUpdate, HandGainAnnouncement } from "./protocol";
 export const HAND_GAIN_DURATION_MS = 8_000;
 
 export class HandGainDisplay {
-  private queue: HandGainAnnouncement[] = [];
   private current: HandGainAnnouncement | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private seed: string | null = null;
@@ -19,13 +18,19 @@ export class HandGainDisplay {
     this.perspective = update.perspective;
     const decision = update.decision?.decision;
     // Give target choices and both the Quick opportunity and its resolution summary the whole screen.
-    // Discard pending notices too: nothing should reopen after the player finishes the choice.
+    // Nothing should reopen after the player finishes the choice.
     const choosingTarget = decision?.type === "selectCards" && decision.reason === "target";
     if (update.logReset || update.result || update.announcement || choosingTarget || decision?.type === "quick") {
       this.clear(false);
     } else {
-      this.queue.push(...(update.handGains ?? []).filter((gain) => gain.operator !== update.perspective));
-      if (!this.current) this.next(false);
+      // Each publication can contain several gains. The latest eligible result replaces the
+      // panel immediately; superseded results never wait in a queue or return after timeout.
+      const gain = update.handGains?.findLast((gain) => gain.operator !== update.perspective);
+      if (gain && gain.key !== this.current?.key) {
+        this.clear(false);
+        this.current = gain;
+        this.timer = setTimeout(() => this.clear(), HAND_GAIN_DURATION_MS);
+      }
     }
     return this.current;
   }
@@ -37,15 +42,7 @@ export class HandGainDisplay {
   clear(notify = true): void {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
-    this.queue = [];
     this.current = null;
     if (notify) this.changed(null);
-  }
-
-  private next(notify: boolean): void {
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.current = this.queue.shift() ?? null;
-    this.timer = this.current ? setTimeout(() => this.next(true), HAND_GAIN_DURATION_MS) : null;
-    if (notify) this.changed(this.current);
   }
 }
