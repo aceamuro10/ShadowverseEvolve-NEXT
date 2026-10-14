@@ -28,9 +28,10 @@ export interface AppState {
   dice: DiceFrame | null;
   diceBusy: boolean;
   handGain: HandGainAnnouncement | null;
+  handGainExpiresAt: number | null;
 }
 
-let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null };
+let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null, handGainExpiresAt: null };
 const listeners = new Set<() => void>();
 
 /** The state now, outside React (online play reads how far the game is). */
@@ -45,12 +46,7 @@ function setState(change: Partial<AppState>): void {
 
 /** The engine worker (one for the whole app). */
 export const engine = new EngineClient();
-const handGains = new HandGainDisplay((handGain) => setState({ handGain }));
-
-/** Closing a notice is entirely local; it sends no worker or online message. */
-export function dismissHandGain(key: string): void {
-  handGains.dismiss(key);
-}
+const handGains: HandGainDisplay = new HandGainDisplay((handGain) => setState({ handGain, handGainExpiresAt: handGains.expiresAt }));
 
 let nextError = 1;
 
@@ -69,7 +65,7 @@ function publishUpdate(update: GameUpdate, interactive: boolean, appendLog = tru
   playUpdateSounds({ ...update, log: update.animationLog ?? update.log }, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
   const allowed = interactive && update === state.authoritative;
   setState({ update: allowed ? update : { ...update, decision: null, manual: null, announcement: null, looked: null },
-    ...(appendLog ? { handGain: handGains.publish(update) } : {}),
+    ...(appendLog ? { handGain: handGains.publish(update), handGainExpiresAt: handGains.expiresAt } : {}),
     log: appendLog ? update.logReset ? update.log : [...state.log, ...update.log] : state.log, diceBusy: !allowed });
 }
 

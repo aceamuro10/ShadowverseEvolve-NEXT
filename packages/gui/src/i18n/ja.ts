@@ -504,6 +504,7 @@ export const ja: Record<MessageKey, string> = {
   "cardTransfer.evolveDeck.title": "裏向きにしたカード · {n}枚",
   "cardTransfer.evolveDeck.text": "{player}が以下のカードをエボルヴデッキで裏向きにしました。",
   "cardTransfer.from": "{zone}から",
+  "cardTransfer.countdown": "あと{n}秒で閉じる",
   "looked.title": "見る",
   "looked.text": "{cards}を見ました（あなただけに見えています）",
   "looked.ok": "OK",

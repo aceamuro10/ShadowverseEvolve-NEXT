@@ -113,9 +113,9 @@ test("public deck returns and evolve resets share the nonmodal panel and replace
   await expect(page.getByTestId("hand-gain-card")).toHaveCount(1);
   await expect(notice.locator('[data-def="BP02-032"]')).toHaveCount(1);
   await page.setViewportSize({ width: 844, height: 390 });
-  await expect(page.getByTestId("hand-gain-close")).toBeInViewport();
+  await expect(page.getByTestId("hand-gain-title")).toBeInViewport();
   await page.screenshot({ path: test.info().outputPath("hidden-zone-notice-small.png") });
-  await page.clock.fastForward(8000);
+  await page.clock.fastForward(5000);
   await expect(notice).toHaveCount(0);
   await expect(page.getByTestId("table-end")).toBeEnabled();
   expect(errors).toEqual([]);

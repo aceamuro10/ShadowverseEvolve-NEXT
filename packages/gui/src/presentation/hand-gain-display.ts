@@ -1,15 +1,21 @@
 import type { GameUpdate, HandGainAnnouncement } from "./protocol";
 
 /** A local notification lifetime, independent of engine inputs, replay speed and network progress. */
-export const HAND_GAIN_DURATION_MS = 8_000;
+export const HAND_GAIN_DURATION_MS = 5_000;
 
 export class HandGainDisplay {
   private current: HandGainAnnouncement | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private deadline: number | null = null;
   private seed: string | null = null;
   private perspective: GameUpdate["perspective"] | null = null;
 
   constructor(private readonly changed: (gain: HandGainAnnouncement | null) => void) {}
+
+  /** Shared with the page's countdown; routine updates do not restart this deadline. */
+  get expiresAt(): number | null {
+    return this.deadline;
+  }
 
   /** Called once per visible engine publication, after preceding dice playback finishes. */
   publish(update: GameUpdate): HandGainAnnouncement | null {
@@ -29,6 +35,7 @@ export class HandGainDisplay {
       if (gain && gain.key !== this.current?.key) {
         this.clear(false);
         this.current = gain;
+        this.deadline = Date.now() + HAND_GAIN_DURATION_MS;
         this.timer = setTimeout(() => this.clear(), HAND_GAIN_DURATION_MS);
       }
     }
@@ -42,6 +49,7 @@ export class HandGainDisplay {
   clear(notify = true): void {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
+    this.deadline = null;
     this.current = null;
     if (notify) this.changed(null);
   }

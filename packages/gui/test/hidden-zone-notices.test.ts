@@ -88,7 +88,7 @@ describe("public cards entering hidden zones", () => {
     expect(t.game.reader().faceUpEvolveDeck(0)).toHaveLength(2);
   });
 
-  it("new deck/evolve notices immediately replace the panel, filter by operator, and expire after 8 seconds", () => {
+  it("new deck/evolve notices immediately replace the panel, filter by operator, and expire after 5 seconds", () => {
     vi.useFakeTimers();
     try {
       const { t, notices } = tracked({ me: { hand: ["BP17-054", "BP16-048", "BP06-117"],
@@ -101,7 +101,7 @@ describe("public cards entering hidden zones", () => {
       const first = notices();
       expect(display.publish(update(first, 0))).toBeNull();
       expect(display.publish(update(first))?.to).toBe("deck");
-      vi.advanceTimersByTime(7000);
+      vi.advanceTimersByTime(HAND_GAIN_DURATION_MS - 1000);
       t.play("BP06-117");
       expect(display.publish(update())?.to).toBe("evolveDeck");
       vi.advanceTimersByTime(1000);

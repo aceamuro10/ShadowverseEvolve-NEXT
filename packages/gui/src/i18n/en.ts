@@ -500,6 +500,7 @@ export const en = {
   "cardTransfer.evolveDeck.title": "Turned facedown · {n}",
   "cardTransfer.evolveDeck.text": "{player} placed the following cards facedown in their evolve deck:",
   "cardTransfer.from": "From {zone}",
+  "cardTransfer.countdown": "Closes in {n} seconds",
   "looked.title": "Look",
   "looked.text": "You looked at {cards}. Only you can see it.",
   "looked.ok": "OK",

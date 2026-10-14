@@ -1597,6 +1597,27 @@ option {
 .sve-hand-gain > :not(.sve-hand-gain-cards) {
   flex-shrink: 0;
 }
+.sve-hand-gain-countdown {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgb(110 200 255 / 0.15);
+  pointer-events: none;
+}
+.sve-hand-gain-countdown > span {
+  display: block;
+  height: 100%;
+  background: #6ec8ff;
+  transform-origin: left;
+  transition: transform 100ms linear;
+}
+.sve-hand-gain-countdown[data-ending] > span {
+  background: #edb75f;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sve-hand-gain-countdown > span { transition: none; }
+}
 .sve-hand-gain-cards {
   --sve-card-width: min(100px, calc((var(--side-width, 270px) - 54px) / 2));
   display: grid;
@@ -1628,9 +1649,6 @@ option {
 }
 .sve-hand-gain-cards small {
   color: var(--sve-muted);
-}
-.sve-hand-gain > button {
-  width: 100%;
 }
 
 /*
