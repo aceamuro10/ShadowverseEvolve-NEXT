@@ -5,7 +5,7 @@ import { findCard, forEachCard } from "../engine/view-utils";
 import { abilitySource } from "./ability-source";
 import type { AbilityDisplayContext } from "./protocol";
 import { DiceObserver } from "./dice-observer";
-import { HandGainObserver, type FaceUpEvolveCard } from "./hand-gain-observer";
+import { HandGainObserver, type FaceUpEvolveCard, type NoticeEffectSource } from "./hand-gain-observer";
 
 interface Saved {
   context: AbilityDisplayContext;
@@ -130,7 +130,6 @@ export class EffectContextObserver {
       const card = this.game.state.cards[id];
       return card?.zone === "evolveDeck" && !card.faceUp;
     });
-    this.handGains.observe(events, revealedBefore, { type: input.type, player: from ?? before?.player ?? null }, turnedFacedown);
     this.serial++;
     const after = this.game.decision;
     this.dice.observe(before, input, events, after);
@@ -148,6 +147,15 @@ export class EffectContextObserver {
       }
       return cards;
     });
+    const noticeSource = (saved: Saved | null | undefined): NoticeEffectSource | null => {
+      if (!saved || !([0, 1] as const).every((p) => saved.visible[p] || visible[p]!.has(saved.context.source))) return null;
+      const context = saved.context;
+      const def = context.providerDef ?? context.sourceCard?.def ?? context.sourceDef;
+      return this.engine.db.has(def) ? { source: context.source, def } : null;
+    };
+    const starting = entry ?? (input.type === "selectPending" ? candidates.get(input.id) : prior);
+    const sourceBefore = noticeSource(starting);
+    const abilitySources = new Map<GameEvent, NoticeEffectSource | null>();
     let root = entry ?? prior;
     // Moving into resolution is evidence of play before cardPlayed, including an effect's inner play.
     for (const event of events) if (event.type === "cardsMoved") for (const m of event.moves) {
@@ -183,6 +191,7 @@ export class EffectContextObserver {
           saved.context.sourceCard ??= card;
         }
       }
+      if (event.type === "abilityPlayed") abilitySources.set(event, noticeSource(saved));
       if (event.type === "abilityTriggered") candidates.set(event.pendingId, saved);
       else {
         // The previous instance can finish its cost just as another instance of the
@@ -262,6 +271,14 @@ export class EffectContextObserver {
       }
       return [d.id, saved];
     }));
+    let flipContext = starting ?? last ?? root;
+    if (root?.nested || starting?.context.kind === "spell" || starting?.context.kind === "cardPlay") flipContext = root;
+    else if (last && starting && last.context.source === starting.context.source) flipContext = last;
+    this.handGains.observe(events, revealedBefore, {
+      type: input.type, player: from ?? before?.player ?? null, source: sourceBefore,
+      playing: beforeViews.some((view) => view.resolution.some((card) => card.id === sourceBefore?.source)),
+      abilitySources, flipSource: noticeSource(flipContext),
+    }, turnedFacedown);
     return events;
   }
 

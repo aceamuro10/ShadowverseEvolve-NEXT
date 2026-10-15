@@ -41,6 +41,11 @@ function HandGainWindow({ update, gain, expiresAt }: { update: GameUpdate; gain:
           </figure>
         ))}
       </div>
+      {gain.effectSource ? (
+        <small className="sve-hand-gain-effect" data-testid="hand-gain-effect-source">
+          {t("cardTransfer.effect", { card: cardName(catalog.def(gain.effectSource), cardLang) })}
+        </small>
+      ) : null}
       <NoticeCountdown expiresAt={expiresAt} />
     </aside>
   );

@@ -12,6 +12,8 @@ export interface HandGainAnnouncement {
   /** The recipient, used only to describe the cards' destination. */
   player: PlayerId;
   to: "hand" | "deck" | "evolveDeck";
+  /** One shared effect source for the entire notice. */
+  effectSource?: DefId | null;
   cards: { id: CardId; card: CardInfo; from: ZoneName }[];
 }
 

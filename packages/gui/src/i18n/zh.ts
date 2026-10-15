@@ -503,6 +503,7 @@ export const zh: Record<MessageKey, string> = {
   "cardTransfer.evolveDeck.title": "进化卡翻回背面 · {n}张",
   "cardTransfer.evolveDeck.text": "{player}将以下卡牌以背面状态置于进化卡组。",
   "cardTransfer.from": "来自{zone}",
+  "cardTransfer.effect": "效果：{card}",
   "cardTransfer.countdown": "{n}秒后关闭",
   "looked.title": "查看",
   "looked.text": "你查看了{cards}（只有你能看到）",

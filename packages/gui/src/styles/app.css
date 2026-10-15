@@ -1647,6 +1647,12 @@ option {
   overflow-wrap: anywhere;
   line-height: 1.3;
 }
+.sve-hand-gain-effect {
+  width: 100%;
+  text-align: center;
+  overflow-wrap: anywhere;
+  color: var(--sve-muted);
+}
 
 /*
  * Cards one has just looked at (board/LookedCards.tsx; the top card of one's deck with nothing to take, or an ability that only
