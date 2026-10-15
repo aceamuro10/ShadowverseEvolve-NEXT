@@ -474,6 +474,7 @@ option {
 }
 
 .sve-card-frame {
+  container-type: inline-size;
   position: relative;
   width: var(--w);
   height: calc(var(--w) * 88 / 63);
@@ -621,6 +622,7 @@ option {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
+  font-size: 9px;
 }
 
 .sve-kw,
@@ -632,40 +634,32 @@ option {
   padding: 0 3px;
 }
 
-.sve-keyword-more {
-  pointer-events: auto;
-  color: inherit;
-  font-family: inherit;
-  border: 1px solid currentColor;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.sve-keyword-more:focus-visible {
-  outline: 2px solid var(--sve-action);
-  outline-offset: 2px;
-}
-
-.sve-keyword-popover {
-  position: fixed;
-  z-index: 310;
+.sve-card-keywords .sve-kw {
+  font-size: inherit;
+  max-width: 100%;
   box-sizing: border-box;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  overflow-wrap: anywhere;
-  padding: 10px 14px;
-  border: 1px solid var(--sve-muted);
-  border-radius: 8px;
-  color: var(--sve-text);
-  background: #171c27;
-  box-shadow: 0 4px 20px #0009;
-  font-size: 14px;
-  line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sve-keyword-popover ul {
-  margin: 0;
-  padding-left: 1.25em;
+.sve-card-keywords-dense {
+  font-size: 8px;
+  gap: 1px;
+}
+
+@container (max-width: 64px) {
+  .sve-card-keywords {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    font-size: 7px;
+    gap: 1px;
+  }
+
+  .sve-card-keywords .sve-kw {
+    line-height: 1.15;
+    padding: 0 1px;
+  }
 }
 
 .sve-card-counters {

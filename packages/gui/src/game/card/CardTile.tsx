@@ -10,7 +10,6 @@ import { showCard, useFocusSelect, type FocusCard } from "../focus";
 import { CardArt } from "./CardArt";
 import { displayOf } from "./display";
 import { normalPlayCost } from "./play-cost";
-import { KeywordExpander } from "./KeywordExpander";
 
 /**
  * How the pending decision uses a card: it can act ("action"), may be chosen ("candidate") or is chosen ("selected"), is a
@@ -38,13 +37,12 @@ interface Props {
   evolveBack?: boolean;
   /** The printing as it is, not a token's chosen art (CardArt). */
   exact?: boolean;
-  /** A drag ghost shares costs but does not open keyword popovers. */
-  keywordInteraction?: boolean;
 }
 
-const MAX_KEYWORDS = 3;
+const MAX_KEYWORDS = 4;
+const DENSE_KEYWORDS = 8;
 
-export function CardTile({ card, info, side, size = "normal", mark = null, onClick, onPointerDown, className, style, children, evolveBack = false, exact = false, keywordInteraction = true }: Props) {
+export function CardTile({ card, info, side, size = "normal", mark = null, onClick, onPointerDown, className, style, children, evolveBack = false, exact = false }: Props) {
   const catalog = useApp((s) => s.catalog);
   const update = useApp((s) => s.update);
   const { cardLang, uiLang } = useSettings();
@@ -109,16 +107,14 @@ export function CardTile({ card, info, side, size = "normal", mark = null, onCli
           ) : null}
           {attack !== null ? <span className={`sve-stat sve-stat-atk${compare(attack, def?.attack)}`}>{attack}</span> : null}
           {defense !== null ? <span className={`sve-stat sve-stat-def${compare(defense, def?.defense)}`}>{defense}</span> : null}
-          {keywords.length > 0 && size !== "small" ? (
-            <div className="sve-card-keywords">
+          {keywords.length > 0 ? (
+            <div className={`sve-card-keywords${keywords.length >= DENSE_KEYWORDS ? " sve-card-keywords-dense" : ""}`}>
               {keywords.slice(0, MAX_KEYWORDS).map((k) => (
-                <span key={k} className={`sve-kw sve-kw-${k}`}>
+                <span key={k} className={`sve-kw sve-kw-${k}`} aria-label={t(`keyword.${k}` as const)}>
                   {t(`keyword.${k}` as const)}
                 </span>
               ))}
-              {keywords.length > MAX_KEYWORDS ? keywordInteraction && view ? (
-                <KeywordExpander card={view} keywords={keywords} remaining={keywords.length - MAX_KEYWORDS} />
-              ) : <span className="sve-kw">+{keywords.length - MAX_KEYWORDS}</span> : null}
+              {keywords.length > MAX_KEYWORDS ? <span className="sve-kw">+{keywords.length - MAX_KEYWORDS}</span> : null}
             </div>
           ) : null}
           {counters.length > 0 ? (

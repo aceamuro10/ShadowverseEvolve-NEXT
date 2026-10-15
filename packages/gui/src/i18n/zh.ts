@@ -756,7 +756,6 @@ export const zh: Record<MessageKey, string> = {
   "timing.other": "诱发",
 
   "card.cost": "费用",
-  "card.expandKeywords": "展开全部关键词",
   "card.attack": "攻击力",
   "card.defense": "生命值",
   "card.printed": "原本值 {value}",

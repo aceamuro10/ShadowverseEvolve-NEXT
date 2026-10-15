@@ -1,7 +1,7 @@
 import type { GameUpdate, HandGainAnnouncement } from "./protocol";
 
 /** A local notification lifetime, independent of engine inputs, replay speed and network progress. */
-export const HAND_GAIN_DURATION_MS = 5_000;
+export const HAND_GAIN_DURATION_MS = 3_000;
 
 export class HandGainDisplay {
   private current: HandGainAnnouncement | null = null;

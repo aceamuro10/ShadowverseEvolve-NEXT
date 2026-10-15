@@ -753,7 +753,6 @@ export const en = {
   "timing.other": "Triggered",
 
   "card.cost": "Cost",
-  "card.expandKeywords": "Show all keywords",
   "card.attack": "Attack",
   "card.defense": "Defense",
   "card.printed": "printed {value}",
