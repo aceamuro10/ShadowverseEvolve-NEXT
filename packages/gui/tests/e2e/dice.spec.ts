@@ -2,16 +2,16 @@ import { expect, test, type Page } from "@playwright/test";
 import { startGame, toMainPhase, useSettings } from "./helpers";
 import { DICE_TIMING } from "../../src/presentation/dice-timing";
 
-async function prepare(page: Page, animated: boolean, extra: string[] = []) {
+async function prepare(page: Page, animated: boolean, extra: string[] = [], evolve: string[] = []) {
   await useSettings(page, { uiLang: "en", cardLang: "ja", animations: animated, bgm: false,
     setupControllers: ["human", "human"], setupTurnOrder: "player1", setupDecks: ["samples/sd01.json", "samples/sd02.json"] });
   await startGame(page, "dice-bootstrap");
-  await page.evaluate(async (extra) => {
+  await page.evaluate(async ({ extra, evolve }) => {
     const { engine } = (await import(/* @vite-ignore */ String("/src/app/store.ts")) as typeof import("../../src/app/store"));
     const main = [...Array(4).fill("ECP02-065"), ...Array(4).fill("BP21-083"), ...Array(4).fill("BP21-080"), ...Array(4).fill("BP21-077"), ...extra.flatMap((id) => Array(4).fill(id)), ...Array(12).fill("BP01-001")];
-    engine.send({ kind: "start", options: { seed: "dice-browser", decks: [{ main, evolve: [] }, { main: Array(30).fill("BP01-001"), evolve: [] }],
+    engine.send({ kind: "start", options: { seed: "dice-browser", decks: [{ main, evolve }, { main: Array(30).fill("BP01-001"), evolve: [] }],
       deckNames: ["Dice", "Targets"], controllers: ["human", "human"], deckRestrictions: false, manualActions: true, showEveryMainPhase: true, turnOrder: "player1" } });
-  }, extra);
+  }, { extra, evolve });
   await expect.poll(() => page.evaluate(async () => ((await import(/* @vite-ignore */ String("/src/app/store.ts")) as typeof import("../../src/app/store"))).getApp().update?.seed)).toBe("dice-browser");
   await toMainPhase(page);
 }
@@ -254,3 +254,114 @@ test("CP01-081: a sole main-phase trigger waits for the preceding draw animation
   expect(thrown).toMatchObject({ ghosts: 0, floats: 0 });
   expect(order.some((s) => s.kind === "flight:end" && s.at <= thrown.at)).toBe(true);
 });
+
+for (const spec of [
+  { base: "BP21-077", evolved: "BP21-078", rolls: 2 },
+  { base: "BP21-073", evolved: "BP21-074", rolls: 3, superEvolve: true },
+  { base: "ECP02-065", evolved: "ECP02-066", rolls: 2, reroll: true },
+  { base: "BP06-110", evolved: "BP06-111", rolls: 1, declare: true },
+]) {
+  test(`${spec.evolved}: evolution appears before its dice without an added flight`, async ({ page }) => {
+    const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+    await prepare(page, true, [spec.base], [spec.evolved]);
+    await field(page, spec.base);
+    // Moving Mithra onto the field can finish its fanfare first; setup must wait for that unrelated roll.
+    await expect(page.locator(".sve-decision")).toHaveAttribute("data-decision", "mainPhase");
+    await input(page, { kind: "points" });
+    await page.evaluate((evolved) => {
+      const w = window as unknown as { evolutionDiceOrder: { kind: string; at: number; running?: number; visible?: boolean }[] };
+      w.evolutionDiceOrder = [];
+      let running = 0;
+      const original = Element.prototype.animate;
+      Element.prototype.animate = function (keyframes, options) {
+        const animation = original.call(this, keyframes, options);
+        const flight = this.classList.contains("sve-ghost") && this.getAttribute("data-def") === evolved;
+        const flip = this.closest(`[data-def="${evolved}"]`) && animation.effect instanceof KeyframeEffect &&
+          animation.effect.getKeyframes().some((k) => String(k.transform).includes("rotateY"));
+        if (flight || flip) {
+          const kind = flight ? "flight" : "flip";
+          running++;
+          w.evolutionDiceOrder.push({ kind: `${kind}:start`, at: performance.now() });
+          const finish = () => {
+            running--;
+            w.evolutionDiceOrder.push({ kind: `${kind}:end`, at: performance.now() });
+            animation.removeEventListener("finish", finish);
+            animation.removeEventListener("cancel", finish);
+          };
+          animation.addEventListener("finish", finish);
+          animation.addEventListener("cancel", finish);
+        }
+        return animation;
+      };
+      let key = "";
+      let appeared = false;
+      new MutationObserver(() => {
+        const card = document.querySelector<HTMLElement>(`.sve-table [data-def="${evolved}"]`);
+        const visible = !!card && card.getBoundingClientRect().width > 0 && getComputedStyle(card).opacity !== "0";
+        if (visible && !appeared) {
+          appeared = true;
+          w.evolutionDiceOrder.push({ kind: "card:visible", at: performance.now() });
+        }
+        const el = document.querySelector<HTMLElement>('[data-testid="dice-overlay"]');
+        if (!el || el.dataset.frame === key) return;
+        key = el.dataset.frame!;
+        w.evolutionDiceOrder.push({ kind: "throw", at: performance.now(), running, visible });
+      }).observe(document.body, { subtree: true, childList: true, attributes: true });
+    }, spec.evolved);
+    await page.evaluate(async (spec) => {
+      const { getApp, engine } = (await import(/* @vite-ignore */ String("/src/app/store.ts")) as typeof import("../../src/app/store"));
+      const u = getApp().update!;
+      const d = u.decision!.decision;
+      if (d.type !== "mainPhase") throw new Error("main phase required");
+      const card = u.view.players[0].field.find((c) => !c.hidden && c.def === spec.base)!.id;
+      let action: import("@sve/core").MainAction;
+      if (spec.superEvolve) {
+        // Manual super-evolution avoids advancing many turns; it emits the same evolution events and triggers.
+        const evolveCard = u.view.players[0].evolveDeck.find((c) => !c.hidden && c.def === spec.evolved)!.id;
+        action = { type: "manual", op: { kind: "evolve", card, evolveCard, superEvolve: true } };
+      } else {
+        const found = d.actions.find((a) => a.type === "evolve" && a.card === card && !a.superEvolve && !a.useEvolutionPoint);
+        if (!found) throw new Error(`No evolve action for ${spec.base}`);
+        action = found;
+      }
+      engine.send({ kind: "answer", seat: d.player, answer: { type: "mainPhase", action } });
+    }, spec);
+    if (spec.superEvolve) {
+      await expect(page.locator(".sve-decision")).toHaveAttribute("data-decision", "selectPending");
+      await page.locator(".sve-pending-option").filter({ hasText: "On Super-Evolve" }).click();
+    }
+    if (spec.declare) {
+      // Answer immediately while the first update's evolution is still animating: the next update must wait too.
+      await expect(page.getByTestId("decision-dialog")).toBeVisible();
+      await page.evaluate(async () => {
+        const { getApp, engine } = (await import(/* @vite-ignore */ String("/src/app/store.ts")) as typeof import("../../src/app/store"));
+        const d = getApp().update!.decision!.decision;
+        if (d.type !== "choose") throw new Error("number declaration required");
+        engine.send({ kind: "answer", seat: d.player, answer: { type: "choose", ids: ["6"] } });
+      });
+    }
+    await expect(page.getByTestId("dice-overlay")).toBeVisible();
+    await expect(page.locator(`.sve-table [data-def="${spec.evolved}"]`)).toBeVisible();
+    if (spec.reroll) {
+      const reroll = page.getByTestId("decision-dialog").getByRole("button", { name: /^Reroll \(now/ });
+      await expect(reroll).toBeVisible();
+      await reroll.click();
+    }
+    await expect.poll(() => page.evaluate(() => (window as unknown as { evolutionDiceOrder: { kind: string }[] }).evolutionDiceOrder.filter((e) => e.kind === "throw").length)).toBe(spec.rolls);
+    await expect(page.getByTestId("dice-overlay")).toHaveCount(0);
+    const order = await page.evaluate(() => (window as unknown as { evolutionDiceOrder: { kind: string; at: number; running?: number; visible?: boolean }[] }).evolutionDiceOrder);
+    const firstDie = order.find((e) => e.kind === "throw")!;
+    expect(order.filter((e) => e.kind === "flight:start")).toHaveLength(0);
+    expect(order.filter((e) => e.kind === "flip:start")).toHaveLength(1);
+    for (const kind of ["card:visible", "flip:end"]) {
+      expect(order.find((e) => e.kind === kind)!.at).toBeLessThanOrEqual(firstDie.at);
+    }
+    expect(order.filter((e) => e.kind === "throw").every((e) => e.running === 0 && e.visible)).toBe(true);
+    const log = await page.evaluate(async () => {
+      const { getApp } = (await import(/* @vite-ignore */ String("/src/app/store.ts")) as typeof import("../../src/app/store"));
+      return getApp().log.filter((e) => e.event.type === "evolved").length;
+    });
+    expect(log).toBe(1);
+    expect(errors).toEqual([]);
+  });
+}
