@@ -48,6 +48,11 @@ function setState(change: Partial<AppState>): void {
 export const engine = new EngineClient();
 const handGains: HandGainDisplay = new HandGainDisplay((handGain) => setState({ handGain, handGainExpiresAt: handGains.expiresAt }));
 
+/** Dismiss only the notice that was clicked; no worker or online acknowledgement is needed. */
+export function dismissHandGain(key: string): void {
+  handGains.dismiss(key);
+}
+
 let nextError = 1;
 
 const beforeUpdate = new Set<(update: GameUpdate) => void>();
