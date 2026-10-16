@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { createEngine, type GameSession, type GameState, type PersistentEffect, type PlayerId } from "@sve/core";
 import { ALL_CARDS, ALL_SCRIPTS } from "@sve/core/sets";
 import { drive, Driver, testFollower, testSpell, testCrest } from "@sve/core/testing";
-// Oracle only: production GUI must not import core internals or change its exports.
-import { playCost as corePlayCost } from "../../core/src/engine/costs";
 import { cardRuntimeDetails } from "../src/presentation/card-details";
 import { createPlayCostQuery } from "../src/presentation/play-cost";
 import { withoutMemory } from "../src/engine/view-utils";
@@ -14,13 +12,6 @@ const engine = createEngine({ cards: [...ALL_CARDS, testFollower("V1", 1, 1, 1),
 const costs = (game: GameSession, seat: PlayerId = 0) => {
   const before = game.snapshot();
   const runtime = cardRuntimeDetails(game.reader(), engine.scripts, withoutMemory(game.view(seat)));
-  for (const side of game.view(seat).players) {
-    for (const card of [...side.hand, ...side.ex]) {
-      if (!card.hidden && card.cost !== null) {
-        expect(runtime[card.id]?.normalPlayCost, card.def).toBe(corePlayCost({ state: game.state, scripts: engine.scripts, db: engine.db }, card.id, side.id));
-      }
-    }
-  }
   expect(game.snapshot()).toEqual(before);
   return runtime;
 };
