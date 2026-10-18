@@ -53,28 +53,25 @@ describe("public cards entering hidden zones", () => {
     expect(gains[0]!.cards[0]!.id).not.toBe(t.id("BP16-048@deck"));
   });
 
-  it("BP06-117 captures the faceup evolve card before it becomes hidden, even when the choice is auto-answered", () => {
+  it("BP06-117 turns the evolve card face down without a notification", () => {
     const { t, notices } = tracked({ me: { hand: ["BP06-117"], faceUpEvolveDeck: ["BP06-002"],
       evolveDeck: ["BP18-006"], deck: ["BP01-038"], playPoints: 1 } });
     t.play("BP06-117");
     const gains = notices();
-    expect(gains).toHaveLength(1);
-    expect(gains[0]).toMatchObject({ to: "evolveDeck", operator: 0, cards: [{ from: "evolveDeck", card: { def: "BP06-002" } }] });
+    expect(gains).toEqual([]);
     expect(t.game.reader().faceUpEvolveDeck(0)).toEqual([]);
     expect(notices()).toEqual([]);
   });
 
-  it("BP18-T01 shows every selected faceup evolve card together, including identical copies", () => {
+  it("BP18-T01 turns selected evolve cards face down without a notification", () => {
     const { t, notices } = tracked({ me: { ex: ["BP18-T01"], faceUpEvolveDeck: ["BP18-006", "BP18-006", "BP18-010"],
       evolveDeck: ["BP06-002"], deck: ["BP01-038"], playPoints: 1 } });
     t.play("BP18-T01@ex");
     expect(notices()).toEqual([]);
     t.pick("BP18-006", "BP18-006", "BP18-010");
     const gains = notices();
-    expect(gains).toHaveLength(1);
-    expect(gains[0]).toMatchObject({ to: "evolveDeck", operator: 0, player: 0 });
-    expect(gains[0]!.cards.map((c) => c.card.def)).toEqual(["BP18-006", "BP18-006", "BP18-010"]);
-    expect(new Set(gains[0]!.cards.map((c) => c.id)).size).toBe(3);
+    expect(gains).toEqual([]);
+    expect(t.game.reader().faceUpEvolveDeck(0)).toEqual([]);
   });
 
   it("does not report choosing no evolve cards or a rejected selection", () => {
@@ -88,7 +85,7 @@ describe("public cards entering hidden zones", () => {
     expect(t.game.reader().faceUpEvolveDeck(0)).toHaveLength(2);
   });
 
-  it("new deck/evolve notices immediately replace the panel, filter by operator, and expire after 5 seconds", () => {
+  it("deck notices filter by operator and evolve flips do not replace them or reset their timeout", () => {
     vi.useFakeTimers();
     try {
       const { t, notices } = tracked({ me: { hand: ["BP17-054", "BP16-048", "BP06-117"],
@@ -103,10 +100,8 @@ describe("public cards entering hidden zones", () => {
       expect(display.publish(update(first))?.to).toBe("deck");
       vi.advanceTimersByTime(HAND_GAIN_DURATION_MS - 1000);
       t.play("BP06-117");
-      expect(display.publish(update())?.to).toBe("evolveDeck");
+      expect(display.publish(update())?.to).toBe("deck");
       vi.advanceTimersByTime(1000);
-      expect(changed).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(HAND_GAIN_DURATION_MS - 1000);
       expect(changed).toHaveBeenCalledExactlyOnceWith(null);
       display.clear();
     } finally { vi.useRealTimers(); }
@@ -139,7 +134,7 @@ describe("private return boundaries", () => {
     expect(observer.drain()).toEqual([]);
   });
 
-  it("shows public field cards returned to deck and faceup evolve cards moved back facedown", () => {
+  it("shows public field cards returned to deck but does not announce returns to the evolve deck", () => {
     const observer = new HandGainObserver();
     observer.observe([event({ player: 0, zone: "field", faceUp: true })], []);
     expect(observer.drain()[0]).toMatchObject({ to: "deck", cards: [{ from: "field" }] });
@@ -147,6 +142,6 @@ describe("private return boundaries", () => {
     if (moved.type !== "cardsMoved") throw new Error("expected move");
     moved.moves[0]!.to = { player: 0, zone: "evolveDeck", faceUp: false };
     observer.observe([moved], []);
-    expect(observer.drain()[0]).toMatchObject({ to: "evolveDeck", cards: [{ id: "old", from: "field" }] });
+    expect(observer.drain()).toEqual([]);
   });
 });

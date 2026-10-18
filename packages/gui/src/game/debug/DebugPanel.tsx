@@ -5,13 +5,17 @@ import type { GameUpdate } from "../../engine/protocol";
 import { hostApi, type HostInfo } from "../../host/api";
 import { useT } from "../../i18n";
 import { requestOnlineUndo } from "../../net/state";
+import { REVEAL_PAUSE_MS } from "../animation/plan";
 import { readReplayFile } from "../replay-files";
 
 /**
  * Tools for testing by hand: manual debugging, undo, rewind, replays (a bug report), hidden cards, bot pace. Online, both
  * programs play one game: only what changes nothing in it is here (the look of the table), and "undo my last answer" in a
  * room that allows it (the other program agrees: net/online.ts). The seed and the bug report file wait for the game's end
- * online: with them, another program could show the hidden cards (the deck orders follow from the seed).
+ * online: with them, another program could show the hidden cards (the deck orders follow from the seed). A player online
+ * also chooses here how their program answers their quick windows (a fake pause, or passing them all), first; and any
+ * player at the screen whether to block the quick chat (game/quick-chat.ts: online, for both players; a spectator, for
+ * themself).
  */
 export function DebugPanel({ update }: { update: GameUpdate }) {
   const t = useT();
@@ -29,10 +33,18 @@ export function DebugPanel({ update }: { update: GameUpdate }) {
   const online = update.online !== null;
   // Online, the seed and the bug report file only once the game is over.
   const secret = online && !update.result;
-  const { animations, manualSlots, manualDebug } = useSettings();
+  const { animations, manualSlots, manualDebug, fakeQuick, skipQuick, blockQuickChat } = useSettings();
+  // A player at the screen (not a spectator, nor a replay or a game of bots being watched), or a spectator online.
+  const player = update.controllers[update.perspective] === "human" && !update.watch;
+  const spectator = update.online?.spectating === true;
   const setManual = (on: boolean) => {
     updateSettings({ manualDebug: on });
     engine.send({ kind: "settings", settings: { manualDebug: on } });
+  };
+  /** How this player's program answers their quick windows (kept for the next games too). */
+  const setQuick = (change: { fakeQuick?: boolean; skipQuick?: boolean }) => {
+    updateSettings(change);
+    engine.send({ kind: "settings", settings: change });
   };
   const saveReplay = async () => {
     const replay = await engine.exportReplay();
@@ -48,6 +60,29 @@ export function DebugPanel({ update }: { update: GameUpdate }) {
   };
   return (
     <div className="sve-debug">
+      {player || spectator ? (
+        <div className="sve-debug-quick" data-testid="debug-quick">
+          {online && player ? (
+            <>
+              <label className="sve-check">
+                <input type="checkbox" checked={fakeQuick} onChange={(e) => setQuick({ fakeQuick: e.target.checked })} data-testid="debug-fake-quick" />
+                {t("debug.fakeQuick")}
+              </label>
+              <p className="sve-hint">{t("debug.fakeQuickHelp")}</p>
+              <label className="sve-check">
+                <input type="checkbox" checked={skipQuick} onChange={(e) => setQuick({ skipQuick: e.target.checked })} data-testid="debug-skip-quick" />
+                {t("debug.skipQuick")}
+              </label>
+              <p className="sve-hint">{t("debug.skipQuickHelp")}</p>
+            </>
+          ) : null}
+          <label className="sve-check">
+            <input type="checkbox" checked={blockQuickChat} onChange={(e) => updateSettings({ blockQuickChat: e.target.checked })} data-testid="debug-block-quick-chat" />
+            {t("debug.blockQuickChat")}
+          </label>
+          <p className="sve-hint">{t(spectator ? "debug.blockQuickChatWatching" : "debug.blockQuickChatHelp")}</p>
+        </div>
+      ) : null}
       <dl className="sve-debug-facts">
         {!secret ? (
           <>
@@ -140,7 +175,7 @@ export function DebugPanel({ update }: { update: GameUpdate }) {
               onChange={(e) => {
                 const botDelayMs = Number(e.target.value);
                 updateSettings({ botDelayMs });
-                engine.send({ kind: "settings", settings: { botDelayMs, attackPauseMs: Math.min(botDelayMs, 500) } });
+                engine.send({ kind: "settings", settings: { botDelayMs, attackPauseMs: Math.min(botDelayMs, 500), revealPauseMs: botDelayMs > 0 ? REVEAL_PAUSE_MS : 0 } });
               }}
             />
           </label>

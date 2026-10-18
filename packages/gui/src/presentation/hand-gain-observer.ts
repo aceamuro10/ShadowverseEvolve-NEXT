@@ -35,6 +35,8 @@ export class HandGainObserver {
     const hidden = new Map<CardId, { move: CardMove; source: NoticeEffectSource | null }>();
     const groups = new Map<string, HandGainAnnouncement>();
     const add = (player: PlayerId, to: HandGainAnnouncement["to"], card: HandGainAnnouncement["cards"][number], effect: NoticeEffectSource | null): void => {
+      // Evolve-deck returns and cards turned face down no longer create notices.
+      if (to === "evolveDeck") return;
       // A panel belongs to one source card, even if several effects resolve in the same act.
       const key = `${player}:${to}:${effect?.source ?? ""}:${effect?.def ?? ""}`;
       let group = groups.get(key);

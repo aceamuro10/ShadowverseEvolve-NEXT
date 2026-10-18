@@ -126,6 +126,22 @@ test("two programs play a game: the host's rules, both decks ready, answers both
   await guest.getByTestId("game-unread").click();
   await expect(guest.getByTestId("online-chat")).toContainText("good luck");
 
+  // The quick chat: the guest's line shows on both sides as who said what, and is in the chat. Either player blocking it
+  // turns it off for both (said in "hello"), until they don't any more.
+  await guest.getByTestId("quick-chat").click();
+  await guest.getByTestId("quick-chat-thank").click();
+  // (Each says who as the table does: the other player with how they play.)
+  await Promise.all([
+    expect(host.getByTestId("chat-notice")).toHaveText("Player 2 (online opponent) sent: Thank you."),
+    expect(guest.getByTestId("chat-notice")).toHaveText("Player 2 sent: Thank you."),
+  ]);
+  await expect(host.getByTestId("online-chat")).toContainText("Them: Thank you.");
+  await host.getByTestId("tab-debug").click();
+  await host.getByTestId("debug-block-quick-chat").check();
+  for (const page of [host, guest]) await expect(page.getByTestId("quick-chat")).toBeDisabled();
+  await host.getByTestId("debug-block-quick-chat").uncheck();
+  for (const page of [host, guest]) await expect(page.getByTestId("quick-chat")).toBeEnabled();
+
   // The guest concedes (unless the game is over already): both see the same end.
   if ((await guest.locator(".sve-decision").getAttribute("data-decision")) !== "over") {
     guest.once("dialog", (dialog) => void dialog.accept());
@@ -217,7 +233,8 @@ async function watchRoom(page: Page, code: string): Promise<void> {
 /** The cards of a player's hand on a page's table, and how many of them show their faces. */
 async function handFaces(page: Page, seat: 0 | 1): Promise<{ cards: number; faces: number }> {
   const cards = await page.locator(`[data-zone="${seat}:hand"] [data-card]`).count();
-  const backs = await page.locator(`[data-zone="${seat}:hand"] [data-card][data-hidden="true"]`).count();
+  // A card put into the hand in public is shown face up a moment (public): it is a back here.
+  const backs = await page.locator(`[data-zone="${seat}:hand"] :is([data-card][data-hidden="true"], [data-card].sve-card-revealed)`).count();
   return { cards, faces: cards - backs };
 }
 

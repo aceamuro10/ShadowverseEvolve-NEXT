@@ -1,4 +1,4 @@
-import { CARD_CLASSES, type AbilityDef, type CardDefinition, type CardScript, type DefId } from "./core";
+import { CARD_CLASSES, PLAYER_ZONES, type AbilityDef, type CardDefinition, type CardScript, type DefId } from "./core";
 
 /**
  * The card feature table: what a card is, as numbers a value network can read without knowing the card — its definition
@@ -11,8 +11,11 @@ import { CARD_CLASSES, type AbilityDef, type CardDefinition, type CardScript, ty
  * a summary of what it counts (ref.*); and per definition its traits (CR 2.4, as indices into the file's trait list), the
  * evolve cards that can evolve it (evolvePartners) and what it counts in full (refs: which zones, whose, which cards, a
  * threshold or a quantity, the ability's timing), for the encoder to count in a position.
+ * Version 3 (same columns) gives each reference where its ability works (`from`) and what its comparison means in the code
+ * around it (`test`: "if fewer than 3, stop" needs at least 3); `ref.threshold` reads the tests, and names match a script's
+ * other names too (alsoNames).
  */
-export const CARD_FEATURES_VERSION = 2;
+export const CARD_FEATURES_VERSION = 3;
 
 const CLASS_COLUMNS = ["cls.neutral", "cls.forest", "cls.sword", "cls.rune", "cls.dragon", "cls.abyss", "cls.haven"] as const;
 const UNIVERSES = ["umamusume", "cinderellaGirls", "vanguard", "princessConnect"] as const;
@@ -124,7 +127,12 @@ export const CARD_FEATURE_COLUMNS_V1: readonly string[] = [
 
 /** What a card's effects do, by family (tools/rl/fx-families.ts: every effect method belongs to one). */
 export const FX_FAMILY_COLUMNS = ["dmg", "aoe", "destroy", "banish", "toHand", "stats", "keyword", "heal", "draw", "search", "summon", "ex", "discard", "mill", "bury", "pp", "cost", "counters", "evolve", "engage", "refresh", "protect", "restrict", "deck", "other"] as const;
-/** The game numbers a card's conditions read (CR 13.2–13.5: Overflow, Necrocharge, Spellchain, Combo, Sanguine). */
+/** The amounts its effects give where the code writes them as numbers (damage, attack and defense given or taken, cards...). */
+export const AMOUNT_COLUMNS = ["dmg", "aoe", "stats", "debuff", "heal", "draw", "mill", "ex", "summon", "pp"] as const;
+/**
+ * The game numbers a card's conditions read (CR 13.2–13.5: Overflow, Necrocharge, Spellchain, Combo, Sanguine): the largest
+ * number asked for (Combo 3 → 3; Overflow and Sanguine → 1).
+ */
 export const COND_COLUMNS = ["overflow", "necrocharge", "spellchain", "combo", "sanguine"] as const;
 const REF_ZONES = ["field", "cemetery", "hand", "deck", "ex", "evolveDeck", "banished"] as const;
 /** What a card counts, in summary: how many references, of which kinds of cards, where, how used, in which abilities. */
@@ -143,12 +151,17 @@ const REF_COLUMNS = [
   "ref.t.continuous",
   "ref.t.activated",
   "ref.t.other",
+  "ref.w.target",
+  "ref.w.affects",
+  "ref.w.each",
+  "ref.top",
 ] as const;
 
-/** The columns, in order: version 1's, then the ones version 2 adds (50). */
+/** The columns, in order: version 1's, then the ones version 2 adds (64). */
 export const CARD_FEATURE_COLUMNS: readonly string[] = [
   ...CARD_FEATURE_COLUMNS_V1,
   ...FX_FAMILY_COLUMNS.map((f) => `fx.${f}`),
+  ...AMOUNT_COLUMNS.map((a) => `amt.${a}`),
   ...COND_COLUMNS.map((c) => `cond.${c}`),
   ...REF_COLUMNS,
 ];
@@ -171,11 +184,23 @@ export type RefFilter =
   | { t: "unevolved" }
   | { t: "token" }
   | { t: "notSelf" }
+  | { t: "racing" }
+  | { t: "engaged" }
   | { t: "any" }
   | { t: "other"; why: string }
   | { t: "and"; args: RefFilter[] }
   | { t: "or"; args: RefFilter[] }
   | { t: "not"; arg: RefFilter };
+
+/**
+ * What a reference's count must be for its effect, or the branch it selects, to happen (tools/rl/script-analysis.ts RefTest):
+ * "gate" the effect needs it, "branch" it picks one of two effects, "bonus" it adds to an effect that happens anyway.
+ */
+export interface RefTest {
+  kind: "atLeast" | "atMost" | "exactly" | "notExactly";
+  n: number;
+  role: "gate" | "branch" | "bonus";
+}
 
 /** One place a card's code counts cards (tools/rl/script-analysis.ts RefSite). */
 export interface CardRef {
@@ -186,15 +211,43 @@ export interface CardRef {
   side: "own" | "opp" | "both" | "?";
   filter: RefFilter;
   agg: "count" | "exists";
-  threshold: { op: ">=" | ">" | "<=" | "<" | "==="; n: number } | null;
+  threshold: { op: ">=" | ">" | "<=" | "<" | "===" | "!=="; n: number } | null;
   scaled: boolean;
+  /** Only the top N cards of the deck are looked at (CR 5.11). */
+  top?: number;
+  /** The cards must have different names. */
+  distinct?: true;
+  /** The player's choices it is under, all of them (RefSite.alt: "opt:<id>", "mode:<n>", "may", "pay", "rite"...). */
+  alt?: string[];
+  /**
+   * Luck, not a condition: the top cards of a deck (nobody knows their order, CR 4.5.2) or a random result. A fair encoder
+   * gives its chance from the cards its player knows are left, never the real cards.
+   */
+  chance?: "top" | "random";
+  /** The comparison in the code around it ("if (n < 3) return" → at least 3, a gate); null: none (a quantity, a filter). */
+  test: RefTest | null;
+  /**
+   * The zones where its ability works (Core's zone names): the ability's validIn, or where the card's abilities work by
+   * default (field; a crest in the EX area, CR 10.3.6; an equipment token in the equipment zone, 14.5.2.1.2); for a script
+   * field, where Core reads it (a play condition in the hand and the EX area, selfKeywords anywhere...).
+   */
+  from: string[];
+  /** The script field it is in, for a reference outside the abilities (ability -1). */
+  key?: string;
 }
+
+/**
+ * A reference as the analysis gives it, before the table adds where it works: `selfZone`, the code counts only while the card
+ * itself is in (or out of) these zones ("if (g.card(self)?.zone !== 'field') return []" before it).
+ */
+export type AnalyzedRef = Omit<CardRef, "test" | "from"> & { test?: RefTest; selfZone?: { zones: string[]; not?: true } };
 
 /** What the tools read from a card's script code (tools/rl/script-analysis.ts). */
 export interface ScriptAnalysis {
   fx: Readonly<Record<string, number>>;
+  amounts: Readonly<Record<string, number>>;
   conds: Readonly<Record<string, number>>;
-  refs: readonly CardRef[];
+  refs: readonly AnalyzedRef[];
 }
 
 /** Whether a filter has parts the analysis couldn't read. */
@@ -205,11 +258,54 @@ export function refPartial(f: RefFilter): boolean {
   return false;
 }
 
-/** The number of cards a reference needs (a guard "if fewer than 3, stop" needs 3), or null: no threshold. */
-export function refNeeded(r: CardRef): number | null {
-  const t = r.threshold;
-  if (!t) return null;
-  return t.op === ">" || t.op === "<=" ? t.n + 1 : t.n;
+/**
+ * The number of cards a reference needs (a guard "if fewer than 3, stop" needs 3), or null: it gates nothing with "at least".
+ * For a chance reference (the deck's top) it is what the effect hopes for, not a condition.
+ */
+export function refNeeded(r: { readonly test?: RefTest | null | undefined }): number | null {
+  const t = r.test;
+  return t && t.role === "gate" && t.kind === "atLeast" ? t.n : null;
+}
+
+const EVERY_ZONE: readonly string[] = PLAYER_ZONES;
+const PLAYED_FROM: readonly string[] = ["hand", "ex"];
+
+/**
+ * Where a reference's ability works (CardRef.from): an ability's validIn or the card's default zones (Core's
+ * defaultAbilityZones: CR 10.3.6 a crest in the EX area, 14.5.2.1.2 an equipment token in the equipment zone, else the
+ * field); a script field where Core reads it.
+ */
+export function refFrom(def: CardDefinition, script: CardScript, r: Pick<AnalyzedRef, "ability" | "key" | "selfZone">): string[] {
+  // Only a script field is read where the card is (selfKeywords...); an ability's resolution may find the card moved since it
+  // was triggered (BP20-120: triggered in the hand when discarded, resolved from the cemetery).
+  const z = r.ability < 0 ? r.selfZone : undefined;
+  return zonesOf(def, script, r).filter((x) => !z || z.zones.includes(x) !== (z.not === true));
+}
+
+function zonesOf(def: CardDefinition, script: CardScript, r: Pick<CardRef, "ability" | "key">): string[] {
+  const home = def.type === "crest" ? ["ex"] : def.type === "equipment" ? ["equipmentZone"] : ["field"];
+  if (r.ability >= 0) {
+    const a = (script.abilities ?? [])[r.ability] as AbilityDef | undefined;
+    return [...((a && "validIn" in a && a.validIn) || home)];
+  }
+  switch (r.key) {
+    case "selfKeywords":
+      return [...EVERY_ZONE];
+    case "playCost":
+    case "playableIf":
+    case "playOptions":
+    case "playOptionsRequired":
+    case "nextPlay":
+      return [...PLAYED_FROM];
+    case "playableFromCemetery":
+      return ["cemetery"];
+    case "exPassives":
+      return ["ex"];
+    case "equipment":
+      return ["equipmentZone"];
+    default:
+      return home;
+  }
 }
 
 /** Encoder v1's columns pooled over a zone's cards (class and universe are the leader's and the side's, not each card's): 108. */
@@ -410,6 +506,7 @@ export function cardFeatureRow(def: CardDefinition, script: CardScript | undefin
   add("equip.abilities", script.equipment?.abilities?.length ?? 0);
   if (analysis) {
     for (const f of FX_FAMILY_COLUMNS) add(`fx.${f}`, analysis.fx[f] ?? 0);
+    for (const a of AMOUNT_COLUMNS) add(`amt.${a}`, analysis.amounts[a] ?? 0);
     for (const c of COND_COLUMNS) add(`cond.${c}`, analysis.conds[c] ?? 0);
     const atoms = (f: RefFilter, t: string): number => (f.t === t ? 1 : f.t === "and" || f.t === "or" ? f.args.reduce((n, x) => n + atoms(x, t), 0) : f.t === "not" ? atoms(f.arg, t) : 0);
     for (const r of analysis.refs) {
@@ -423,8 +520,12 @@ export function cardFeatureRow(def: CardDefinition, script: CardScript | undefin
       add("ref.scaled", r.scaled);
       add("ref.partial", refPartial(r.filter));
       add(r.timing === "fanfare" ? "ref.t.fanfare" : r.timing === "continuous" || r.timing === "fromHand" ? "ref.t.continuous" : r.timing === "activated" || r.timing === "evolve" ? "ref.t.activated" : "ref.t.other", 1);
+      add("ref.w.target", !r.chance && (r.where === "target" || r.where === "targetCondition" || r.where === "choose"));
+      add("ref.w.affects", r.where === "affects" || r.where === "trigger");
+      add("ref.w.each", r.where === "each");
+      add("ref.top", r.top !== undefined || r.chance !== undefined);
     }
-    const thresholds = analysis.refs.map(refNeeded).filter((n): n is number => n !== null && n <= 20);
+    const thresholds = analysis.refs.filter((r) => !r.chance).map(refNeeded).filter((n): n is number => n !== null && n <= 20);
     if (thresholds.length > 0) add("ref.threshold", Math.max(...thresholds));
   }
   return row.map((v) => Math.min(v, 2047));
@@ -526,14 +627,15 @@ export function buildCardFeatureFile(
     if (own.length > 0) cardTraits[id] = own;
   }
   const evolvePartners = partnersByFollower(definitions, scripts);
-  // References, with names given as the definitions bearing them (the table holds no names).
-  const named = (match: (name: string) => boolean) => definitions.filter((d) => match(d.name)).map((d) => d.id).sort();
+  // References, with names given as the definitions bearing them (the table holds no names): a definition's own name and the
+  // other names its script gives it (alsoNames, "this card is also named X").
+  const named = (match: (name: string) => boolean) => definitions.filter((d) => [d.name, ...(scripts[d.id]?.alsoNames ?? [])].some(match)).map((d) => d.id).sort();
   const compile = (f: RefFilter): RefFilter =>
     f.t === "name" ? { t: "defs", v: named((n) => n === f.v) } : f.t === "nameIncludes" ? { t: "defs", v: named((n) => n.includes(f.v)) } : f.t === "and" || f.t === "or" ? { t: f.t, args: f.args.map(compile) } : f.t === "not" ? { t: "not", arg: compile(f.arg) } : f;
   const refs: Record<DefId, CardRef[]> = {};
   for (const id of ids) {
     const a = scripts[id] ? analysisOf(id) : undefined;
-    if (a && a.refs.length > 0) refs[id] = a.refs.map((r) => ({ ...r, zones: [...r.zones], filter: compile(r.filter) }));
+    if (a && a.refs.length > 0) refs[id] = a.refs.map(({ selfZone: _z, ...r }) => ({ ...r, zones: [...r.zones], filter: compile(r.filter), test: r.test ?? null, from: refFrom(byId.get(id)!, scripts[id]!, { ...r, ...(_z ? { selfZone: _z } : {}) }) }));
   }
   const rowText = [
     ...ids.map((id) => `${id}:${rows[id]!.map(([i, v]) => `${i}=${v}`).join(",")}`),

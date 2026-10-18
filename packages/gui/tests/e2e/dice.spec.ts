@@ -128,9 +128,9 @@ test("consecutive dice finish before the pending list; reverse selection keeps i
   })).toBe(true);
   const point = await pending.last().getByTestId("trigger-die").getAttribute("data-result");
   await pending.last().click();
-  await expect(page.getByTestId("table-ability").getByTestId("trigger-die")).toHaveAttribute("data-result", point!);
+  await expect(page.getByTestId("table-processing").getByTestId("trigger-die")).toHaveAttribute("data-result", point!);
   await page.setViewportSize({ width: 915, height: 412 });
-  await expect(page.getByTestId("table-ability").locator("summary").getByTestId("trigger-die")).toHaveAttribute("data-result", point!);
+  await expect(page.getByTestId("table-processing").locator("summary").getByTestId("trigger-die")).toHaveAttribute("data-result", point!);
   await page.screenshot({ path: test.info().outputPath("dice-trigger-compact.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const recorded = await page.evaluate(() => (window as unknown as { diceTrace: { phase: string }[] }).diceTrace);

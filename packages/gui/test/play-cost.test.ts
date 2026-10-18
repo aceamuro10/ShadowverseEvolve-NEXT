@@ -201,11 +201,11 @@ describe("normal play cost presentation", () => {
     const runtime = costs(t.game);
     expect(runtime[t.id("opp:V1")]).toBeUndefined();
     expect(runtime[t.id("V5")]?.normalPlayCost).toBeUndefined();
-    const update = { view: t.game.view(0), cardDetails: runtime } as GameUpdate;
+    const update = { view: t.game.view(0), perspective: 0, playCosts: {} } as GameUpdate;
     const card = update.view.players[0].hand[0]!;
     if (card.hidden) throw new Error("own hand hidden");
     expect(normalPlayCost(update, card)).toBe(1);
-    runtime[card.id]!.normalPlayCost = 0;
+    update.playCosts![card.id] = 0;
     expect(normalPlayCost(update, card)).toBe(0);
     update.view.players[0].hand = [];
     expect(normalPlayCost(update, card)).toBeUndefined();

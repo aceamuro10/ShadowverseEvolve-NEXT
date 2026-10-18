@@ -3,16 +3,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseAst } from "rolldown/parseAst";
 import { describe, expect, it } from "vitest";
-import { buildCardFeatureFile, cardFeatureFileText, cardFeatureTable, FX_FAMILY_COLUMNS, type CardFeatureFile } from "../../packages/bot/src";
+import { buildCardFeatureFile, CARD_FEATURE_COLUMNS, cardFeatureFileText, cardFeatureRow, cardFeatureTable, FX_FAMILY_COLUMNS, type CardFeatureFile, type RefFilter } from "../../packages/bot/src";
 import { rulesFingerprint } from "../../packages/gui/fingerprint";
 import { FAMILY_OF, FX_FAMILY_NAMES } from "../rl/fx-families";
 import { checkReferences } from "../rl/ref-oracle";
 import { analyzeScripts, type CardAnalysis } from "../rl/script-analysis";
-import { createEngine, randomAnswer, seedRng, type AbilityDef, type GameSession } from "../../packages/core/src";
+import { moduleOf, scriptFiles, textOf, walk, type Module, type Node } from "../rl/script-source";
+import { createEngine, PLAYER_ZONES, randomAnswer, seedRng, type AbilityDef, type GameSession } from "../../packages/core/src";
 import { correspondingEvolveCards } from "../../packages/core/src/engine/abilities/evolve";
 import type { G } from "../../packages/core/src/engine/runtime/context";
-import { characteristics } from "../../packages/core/src/engine/state/characteristics";
-import type { GameState } from "../../packages/core/src/model/state";
+import type { Env } from "../../packages/core/src/engine/state/access";
+import { abilityZones, characteristics } from "../../packages/core/src/engine/state/characteristics";
+import type { GameState, ZoneName } from "../../packages/core/src/model/state";
 import { ALL_CARDS, ALL_SCRIPTS } from "../../packages/core/src/sets";
 import { deckPool, randomDeck } from "../../packages/core/src/testing";
 import { DECK_SETS, sampleDeck } from "../rl/series";
@@ -49,11 +51,14 @@ describe("the effect families", () => {
 });
 
 describe("what a card counts, read from its script", () => {
-  const refs = (def: string) => analysis().get(def)!.refs.map((r) => ({ timing: r.timing, where: r.where, zones: r.zones, side: r.side, filter: r.filter, agg: r.agg, threshold: r.threshold, scaled: r.scaled }));
+  const refs = (def: string) =>
+    analysis()
+      .get(def)!
+      .refs.map((r) => ({ timing: r.timing, where: r.where, zones: r.zones, side: r.side, filter: r.filter, agg: r.agg, threshold: r.threshold, scaled: r.scaled, ...(r.top ? { top: r.top } : {}), ...(r.distinct ? { distinct: r.distinct } : {}) }));
   it("for cards whose effects count a kind of card", () => {
     // BP11-058: banish up to as many enemy followers as Dragoncraft cards costing 7 or more in your cemetery; its activated
     // ability's cost discards another such card from the hand.
-    expect(refs("BP11-058")).toEqual([
+    expect(refs("BP11-058").filter((r) => r.where !== "target")).toEqual([
       { timing: "fanfare", where: "max", zones: ["cemetery"], side: "own", filter: { t: "and", args: [{ t: "class", v: "Dragoncraft" }, { t: "costMin", v: 7 }] }, agg: "count", threshold: null, scaled: true },
       { timing: "activated", where: "canPay", zones: ["hand"], side: "own", filter: { t: "and", args: [{ t: "notSelf" }, { t: "class", v: "Dragoncraft" }, { t: "costMin", v: 7 }] }, agg: "exists", threshold: { op: ">=", n: 1 }, scaled: false },
     ]);
@@ -64,23 +69,157 @@ describe("what a card counts, read from its script", () => {
     // CSD02a-003: at least 3 Cute followers on your field (destructured card information).
     expect(refs("CSD02a-003")[0]).toMatchObject({ timing: "continuous", where: "selfKeywords", zones: ["field"], filter: { t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "キュート" }] }, threshold: { op: ">=", n: 3 } });
     // BP07-021: Swordcraft followers in your cemetery, read from the printed definitions; 10 for Storm, 5 for the fanfare.
-    expect(refs("BP07-021").map((r) => [r.timing, r.threshold?.n])).toEqual([
+    expect(refs("BP07-021").filter((r) => r.where !== "target").map((r) => [r.timing, r.threshold?.n])).toEqual([
       ["continuous", 10],
       ["fanfare", 5],
     ]);
     // SD05-006: as much damage as Forest Bat tokens on your field.
-    expect(refs("SD05-006")[0]).toMatchObject({ zones: ["field"], side: "own", filter: { t: "and", args: [{ t: "token" }, { t: "name", v: "Forest Bat" }] }, scaled: true });
+    expect(refs("SD05-006").find((r) => r.where === "resolve")).toMatchObject({ zones: ["field"], side: "own", filter: { t: "and", args: [{ t: "token" }, { t: "name", v: "Forest Bat" }] }, scaled: true });
+  }, 120_000);
+  it("for keyword conditions, deck-top looks, the cards a passive or trigger is about, and amounts", () => {
+    const a = (def: string) => analysis().get(def)!;
+    // BP01-017: Combo (3) (CR 13.2.1.2), 3 damage; SD01-009: Combo (3).
+    expect(a("BP01-017").conds.combo).toBe(3);
+    expect(a("BP01-017").amounts.dmg).toBe(3);
+    // SD03-001: Spellchain (7) and (15) (CR 13.3.1.2), each a count of the spells in your cemetery; BP01-070 reads the count.
+    expect(refs("SD03-001").map((r) => [r.where, r.threshold?.n])).toEqual([
+      ["spellchain", 7],
+      ["spellchain", 15],
+    ]);
+    expect(refs("BP01-070").filter((r) => r.where === "spellchain").map((r) => r.threshold?.n)).toEqual([5, 10]);
+    // SD05-010: Necrocharge (10) (CR 13.5.1.2).
+    expect(a("SD05-010").conds.necrocharge).toBe(10);
+    // BP01-148: an amulet among the top 5 cards of your deck (CR 5.11).
+    expect(refs("BP01-148")).toMatchObject([{ where: "search", zones: ["deck"], top: 5, filter: { t: "type", v: "amulet" } }]);
+    // SD01-002: your Pixie tokens have Assail; when a Pixie token enters your field, it gets +1/+1; its fanfare buffs each one.
+    expect(refs("SD01-002").map((r) => [r.where, JSON.stringify(r.filter)])).toEqual([
+      ["affects", JSON.stringify({ t: "and", args: [{ t: "token" }, { t: "trait", v: "妖精" }] })],
+      ["trigger", JSON.stringify({ t: "and", args: [{ t: "token" }, { t: "trait", v: "妖精" }] })],
+      ["each", JSON.stringify({ t: "and", args: [{ t: "token" }, { t: "trait", v: "妖精" }, { t: "type", v: "follower" }] })],
+    ]);
+    // SD01-001: your other Pixie followers have Rush.
+    expect(refs("SD01-001")[0]).toMatchObject({ where: "affects", zones: ["field"], side: "own", filter: { t: "and", args: [{ t: "notSelf" }, { t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "妖精" }] }] } });
+    // BP01-119: mill 1; BP09-060: 5 damage (the larger branch).
+    expect(a("BP01-119").amounts.mill).toBe(1);
+    expect(a("BP09-060").amounts.dmg).toBe(5);
+    // CP04-038: spells with different names in your cemetery.
+    expect(refs("CP04-038").find((r) => r.zones[0] === "cemetery")).toMatchObject({ where: "target", distinct: true });
+  }, 120_000);
+  it("for the cards a community player checked by hand", () => {
+    const one = (def: string, where: string) => refs(def).filter((r) => r.where === where);
+    const follower = { t: "type", v: "follower" };
+    // CP01-034: one of your racing followers (CR 14.2.3.1); CSD01-030: whether the chosen Umamusume is racing.
+    expect(one("CP01-034", "resolve")).toMatchObject([{ zones: ["field"], side: "own", filter: { t: "and", args: [follower, { t: "racing" }] } }]);
+    expect(one("CSD01-030", "targetCondition")).toMatchObject([{ filter: { t: "and", args: [follower, { t: "trait", v: "ウマ娘" }, { t: "racing" }] } }]);
+    // DSD01b-012: a closure made by a factory (withAnotherDuelist): another Duelist on your field.
+    expect(one("DSD01b-012", "selfKeywords")).toMatchObject([{ zones: ["field"], filter: { t: "and", args: [{ t: "notSelf" }, { t: "trait", v: "武闘竜人" }] } }]);
+    // CP04-008: engage 3 reserved cards as its cost (CR 10.4.6; a helper's default count n = 3).
+    expect(one("CP04-008", "canPay")).toMatchObject([{ filter: { t: "not", arg: { t: "engaged" } }, agg: "count", threshold: { op: ">=", n: 3 } }]);
+    // CP04-073: banish 5 cards from your cemetery (zones mapped through a callback; a rule exception is not a kind of card).
+    expect(one("CP04-073", "canPay")).toMatchObject([{ zones: ["cemetery"], filter: { t: "any" }, threshold: { op: ">=", n: 5 } }]);
+    // CP04-101: the default count of a cost helper; BP13-019: its default filter, with the caller's filter.
+    expect(one("CP04-101", "canPay")).toMatchObject([{ filter: { t: "type", v: "amulet" }, threshold: { op: ">=", n: 1 } }]);
+    expect(one("BP13-019", "canPay")).toMatchObject([{ filter: { t: "and", args: [{ t: "notSelf" }, follower, { t: "trait", v: "レヴィオン" }] } }]);
+    // BP13-027: a card put from your hand, chosen among a computed list (its cost bound by your max PP is not read yet).
+    expect(one("BP13-027", "choose")).toMatchObject([{ zones: ["hand"], side: "own", filter: { t: "and", args: [follower, { t: "class", v: "Swordcraft" }, { t: "nameIncludes", v: "Albert" }, { t: "other" }] } }]);
+    // BP13-028, DSD01a-014: a play option's cost spread into its object.
+    expect(one("BP13-028", "canPay")).toMatchObject([{ filter: { t: "and", args: [follower, { t: "trait", v: "レヴィオン" }, { t: "costMax", v: 3 }] } }]);
+    expect(one("DSD01a-014", "canPay")).toMatchObject([{ zones: ["hand"], filter: { t: "and", args: [{ t: "notSelf" }, { t: "trait", v: "学院" }] }, threshold: { op: ">=", n: 2 } }]);
+    // BP13-035: the three sisters (a constant list's .some / .map): any of them, then each.
+    expect(one("BP13-035", "search")[0]!.filter).toMatchObject({ t: "or", args: [{ t: "name" }, { t: "name" }, { t: "name" }] });
+    expect(one("BP13-035", "searchEach")).toHaveLength(3);
+    // BP10-054: "if the top card costs less than 5, stop": the top card costs 5 or more.
+    expect(refs("BP10-054")).toMatchObject([{ where: "topCard", zones: ["deck"], top: 1, filter: { t: "costMin", v: 5 } }]);
+    // CP02-103, ECP02-039: loops matching the cards to pay with are not effects "for each".
+    expect(one("CP02-103", "each")).toEqual([]);
+    expect(one("ECP02-039", "each")).toEqual([]);
+    // CP04-016: a predicate's guard ("if (id === self) return false") stays when the rest can't be read.
+    expect(one("CP04-016", "canPay")[0]!.filter).toMatchObject({ t: "and", args: [{ t: "notSelf" }, { t: "other" }] });
+  }, 120_000);
+  it("under the player's choices, and the deck's top as luck", () => {
+    const all = (def: string) => analysis().get(def)!.refs;
+    // BP13-035: one sister to the hand, or (played for 4 more, CR 10.4.7.3) one of each summoned.
+    expect(all("BP13-035").map((r) => [r.where, r.alt])).toEqual([
+      ["searchEach", ["opt:plus4"]],
+      ["searchEach", ["opt:plus4"]],
+      ["searchEach", ["opt:plus4"]],
+      ["search", ["!opt:plus4"]],
+    ]);
+    // DSD01a-014: a required single play option is no choice.
+    expect(all("DSD01a-014")[0]!.alt).toBeUndefined();
+    // BP01-057: the play option's cost, 10 spells in the cemetery (g.spellsInCemetery).
+    expect(all("BP01-057")).toMatchObject([{ where: "canPay", alt: ["opt:banish10"], zones: ["cemetery"], filter: { t: "type", v: "spell" }, threshold: { op: ">=", n: 10 } }]);
+    // CP03-014: its target is needed in either mode (one ref, no tag); mode 2 has its own cost (CR 10.4.7.5), and its
+    // search is luck (the top card).
+    expect(all("CP03-014").map((r) => [r.where, r.alt ?? null, r.chance ?? null])).toEqual([
+      ["target", null, null],
+      ["canPay", ["mode:2", "pay"], null],
+      ["search", ["mode:2", "pay"], "top"],
+    ]);
+    // BP06-017: an optional cost's own requirement (fx.optionalCost, CR 10.4.7.5).
+    expect(all("BP06-017").find((r) => r.where === "canPay")).toMatchObject({ alt: ["pay"], agg: "count", threshold: { op: ">=", n: 2 } });
+    // On Super-Evolve is its own timing (CR 12.17).
+    expect(all("CP04-038").map((r) => r.timing)).toEqual(["onEvolve", "onSuperEvolve"]);
+    // BP10-054: the top card's original cost — luck for a fair player (CR 4.5.2), not a condition.
+    expect(all("BP10-054")).toMatchObject([{ where: "topCard", chance: "top", top: 1, filter: { t: "costMin", v: 5 } }]);
+    // PCS01-048: a PriConne follower on top (the helper's whole filter, one condition); CP02-015: a Cute card taken from the top.
+    expect(all("PCS01-048").find((r) => r.chance)).toMatchObject({ where: "topCard", filter: { t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "プリコネ" }] } });
+    expect(all("CP02-015")).toMatchObject([{ where: "topCard", chance: "top", filter: { t: "trait", v: "キュート" } }]);
+    // BP15-024: the opponent's top card (fx.mill(1, opponent)): a follower, or a spell or an amulet.
+    expect(all("BP15-024").map((r) => [r.side, r.chance, r.filter])).toEqual([
+      ["opp", "top", { t: "type", v: "follower" }],
+      ["opp", "top", { t: "or", args: [{ t: "type", v: "spell" }, { t: "type", v: "amulet" }] }],
+    ]);
+    // A test on a top card negated: BP14-099 "a non-Havencraft card", BP17-045 "a non-Runecraft card".
+    expect(all("BP14-099").find((r) => r.chance)!.filter).toEqual({ t: "not", arg: { t: "class", v: "Havencraft" } });
+    expect(all("BP17-045")[0]!.filter).toEqual({ t: "not", arg: { t: "class", v: "Runecraft" } });
+    // ...given up on when it fails ("if (!milled.some(...)) return;"): BP05-054 goes on with a Rhino on top.
+    expect(all("BP05-054").find((r) => r.chance)!.filter).toEqual({ t: "name", v: "Electromagical Rhino" });
+    // Two tests on one top card are one condition (BP21-066: a Dragoncraft follower).
+    expect(all("BP21-066").map((r) => r.filter)).toEqual([{ t: "and", args: [{ t: "type", v: "follower" }, { t: "class", v: "Dragoncraft" }] }]);
+    // Each player's top card (BP01-083): the side isn't known from the code.
+    expect(all("BP01-083")[0]!.side).toBe("?");
+    // An automatic ability's own optional cost (CR 10.4.7.4): its target is under "pay", its trigger isn't (BP13-027).
+    expect(all("CP04-008").map((r) => [r.where, r.alt])).toEqual([
+      ["canPay", ["pay"]],
+      ["target", ["pay"]],
+    ]);
+    expect(all("BP13-027").find((r) => r.where === "trigger")!.alt).toBeUndefined();
+    // ...nor its condition, checked before paying (BP13-024); a mode's own cost (DSD01a-008 mode 2, CR 10.4.7.5).
+    expect(all("BP13-024").find((r) => r.where === "condition")!.alt).toBeUndefined();
+    expect(all("DSD01a-008").find((r) => r.where === "resolve")!.alt).toEqual(["mode:2", "pay"]);
+    // "if (!machina(g, id)) continue;" in a loop: each Machina follower (BP07-070).
+    expect(all("BP07-070").filter((r) => r.where === "each").map((r) => r.filter)).toEqual([
+      { t: "type", v: "follower" },
+      { t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "機械" }] },
+    ]);
+    // "if it isn't Mjerrabaine: +1/+1, done" then +3/+3: both conditions on the target (BP05-112).
+    expect(all("BP05-112").filter((r) => r.where === "targetCondition").map((r) => JSON.stringify(r.filter))).toEqual([
+      JSON.stringify({ t: "and", args: [{ t: "type", v: "follower" }, { t: "not", arg: { t: "name", v: "Mjerrabaine, Omen of One" } }] }),
+      JSON.stringify({ t: "and", args: [{ t: "type", v: "follower" }, { t: "name", v: "Mjerrabaine, Omen of One" }] }),
+    ]);
+    // In the table: luck is counted in ref.top, not as a target or a threshold.
+    const row = (def: string) => {
+      const r = cardFeatureRow(engine.db.get(def), ALL_SCRIPTS[def], { ...analysis().get(def)!, refs: analysis().get(def)!.refs.map((x) => ({ ...x, filter: x.filter as RefFilter })) });
+      return (c: string) => r[CARD_FEATURE_COLUMNS.indexOf(c)];
+    };
+    const erntz = row("BP10-054");
+    expect([erntz("ref.top"), erntz("ref.w.target"), erntz("ref.threshold")]).toEqual([1, 0, 0]);
   }, 120_000);
   it("for what a card's targets and searches need", () => {
     // CSD02a-001: a Cute follower costing 4 or less (and one costing 2 or less) in your cemetery.
     expect(refs("CSD02a-001").map((r) => [r.where, r.zones[0], r.agg, JSON.stringify(r.filter)])).toEqual([
       ["target", "cemetery", "exists", JSON.stringify({ t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "キュート" }, { t: "costMax", v: 4 }] })],
       ["target", "cemetery", "exists", JSON.stringify({ t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "キュート" }, { t: "costMax", v: 2 }] })],
+      // Lesson (1) (CR 14.3.2.1): a Magical Item in your EX area.
+      ["canPay", "ex", "count", JSON.stringify({ t: "name", v: "Magical Item" })],
     ]);
     // BP09-060: 5 damage instead of 2 when the chosen enemy follower is a Wyrmkin: is there one.
-    expect(refs("BP09-060")).toEqual([{ timing: "onEvolve", where: "targetCondition", zones: ["field"], side: "opp", filter: { t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "竜族" }] }, agg: "exists", threshold: { op: ">=", n: 1 }, scaled: false }]);
-    // BP12-054: whether its EX area has room is the zone's size, already in the vector: no reference.
-    expect(refs("BP12-054")).toEqual([]);
+    expect(refs("BP09-060").filter((r) => r.where === "targetCondition")).toEqual([{ timing: "onEvolve", where: "targetCondition", zones: ["field"], side: "opp", filter: { t: "and", args: [{ t: "type", v: "follower" }, { t: "trait", v: "竜族" }] }, agg: "exists", threshold: { op: ">=", n: 1 }, scaled: false }]);
+    // BP01-017: its target, an enemy follower (a removal has nothing to do without one).
+    expect(refs("BP01-017")).toEqual([{ timing: "fanfare", where: "target", zones: ["field"], side: "opp", filter: { t: "type", v: "follower" }, agg: "exists", threshold: { op: ">=", n: 1 }, scaled: false }]);
+    // BP12-054: whether its EX area has room is the zone's size, already in the vector: no reference (only its target).
+    expect(refs("BP12-054").filter((r) => r.where !== "target")).toEqual([]);
     // BP08-018: search your deck for a Commander or a Soldier.
     expect(refs("BP08-018")[0]).toMatchObject({ where: "search", zones: ["deck"], agg: "exists", filter: { t: "or", args: [{ t: "trait", v: "指揮官" }, { t: "trait", v: "兵士" }] } });
   }, 120_000);
@@ -153,4 +292,175 @@ describe("card-features.json, against the card data and the engine", () => {
     expect(followers).toBeGreaterThan(1000);
     expect(withOptions).toBeGreaterThan(200);
   }, 300_000);
+});
+
+describe("card table v3: where a reference works, and what its comparison means", () => {
+  const test = (def: string) => table.refsOf(def).map((r) => [r.where, r.test && `${r.test.kind} ${r.test.n} ${r.test.role}`]);
+  it("reads each comparison in the direction its effect needs", () => {
+    // BP10-109: "if you have another follower, stop" — the effect needs none.
+    expect(test("BP10-109")).toContainEqual(["resolve", "atMost 0 gate"]);
+    // CSD02b-003: the same, for another Cool follower.
+    expect(test("CSD02b-003")).toContainEqual(["resolve", "atMost 0 gate"]);
+    // BP03-020: evolve only with 2 cards or fewer in your hand.
+    expect(test("BP03-020")).toContainEqual(["condition", "atMost 2 gate"]);
+    // DSD01b-001: "if there is no Aftershock" picks one of two effects.
+    expect(test("DSD01b-001")).toContainEqual(["resolve", "atMost 0 branch"]);
+    // CP04-088: "if the opponent has no follower, stop" — the effect needs one.
+    expect(test("CP04-088")).toContainEqual(["resolve", "atLeast 1 gate"]);
+    // CP01-076: returned to the hand when there is no other Mejiro follower (more done under an if).
+    expect(test("CP01-076")).toContainEqual(["resolve", "atMost 0 bonus"]);
+    // BP12-045: a fanfare for when there is no follower in your cemetery.
+    expect(test("BP12-045")).toContainEqual(["condition", "atMost 0 gate"]);
+    // BP22-011: "if you don't have exactly 5 Fairies in your EX area, stop".
+    expect(test("BP22-011")).toContainEqual(["resolve", "exactly 5 gate"]);
+    // CSD02a-004 / DSD01a-002: "if fewer than N, stop".
+    expect(test("CSD02a-004")).toContainEqual(["resolve", "atLeast 5 gate"]);
+    expect(test("DSD01a-002")).toContainEqual(["resolve", "atLeast 10 gate"]);
+    // CP04-069: "Storm while there is another PriConne follower" (an exists test inside a helper with a guard of its own).
+    expect(test("CP04-069")).toEqual([["keywordsFor", "atLeast 1 gate"]]);
+    // BP20-008: one comparison used twice ("six ? 3 : 2" and "if (six)") is one reference, a branch.
+    expect(test("BP20-008")).toEqual([["target", null], ["resolve", "atLeast 6 branch"]]);
+    // BP01-070: Spellchain only ever adds.
+    expect(test("BP01-070").filter(([w]) => w === "spellchain")).toEqual([["spellchain", "atLeast 5 bonus"], ["spellchain", "atLeast 10 bonus"]]);
+    // The table's ref.threshold reads the gates: BP10-109's guard needs no follower, so its largest "at least" is none.
+    expect(table.row("BP10-109")[CARD_FEATURE_COLUMNS.indexOf("ref.threshold")]).toBe(0);
+    expect(table.row("DSD01a-002")[CARD_FEATURE_COLUMNS.indexOf("ref.threshold")]).toBe(10);
+  });
+
+  it("gives every give-up guard and boolean closure on a count a test in that direction (all scripts)", () => {
+    // The source read on its own: "if (X op n) return" needs the opposite of "X op n"; a condition closure needs it as written.
+    type K = { kind: string; n: number };
+    const norm = (k: K): K => (k.kind === "exactly" && k.n === 0 ? { kind: "atMost", n: 0 } : k.kind === "notExactly" && k.n === 0 ? { kind: "atLeast", n: 1 } : k);
+    const neg = (k: K): K => norm(k.kind === "atLeast" ? { kind: "atMost", n: k.n - 1 } : k.kind === "atMost" ? { kind: "atLeast", n: k.n + 1 } : k.kind === "exactly" ? { kind: "notExactly", n: k.n } : { kind: "exactly", n: k.n });
+    const MIRROR: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=", "===": "===", "!==": "!==" };
+    const written = (m: Module, t: Node): K | null => {
+      if (t.type === "UnaryExpression" && t.operator === "!") {
+        const inner = written(m, t.argument as Node);
+        return inner && neg(inner);
+      }
+      if (t.type === "ChainExpression" || t.type === "ParenthesizedExpression") return written(m, t.expression as Node);
+      if (t.type === "CallExpression" && (t.callee as Node).type === "MemberExpression" && ((t.callee as Node).property as Node).name === "some") return { kind: "atLeast", n: 1 };
+      if (t.type !== "BinaryExpression" || !MIRROR[t.operator as string]) return null;
+      const num = (x: Node) => (x.type === "Literal" && typeof x.value === "number" ? (x.value as number) : null);
+      let [op, side, n] = [t.operator as string, t.left as Node, num(t.right as Node)];
+      if (n === null && num(t.left as Node) !== null) [op, side, n] = [MIRROR[op]!, t.right as Node, num(t.left as Node)];
+      if (n === null || !/\.(some|length)\b/.test(textOf(m, side))) return null;
+      return norm(op === ">=" ? { kind: "atLeast", n } : op === ">" ? { kind: "atLeast", n: n + 1 } : op === "<=" ? { kind: "atMost", n } : op === "<" ? { kind: "atMost", n: n - 1 } : op === "===" ? { kind: "exactly", n } : { kind: "notExactly", n });
+    };
+    const giveUp = (n: Node): boolean =>
+      n.type === "BlockStatement"
+        ? (n.body as Node[]).length === 1 && giveUp((n.body as Node[])[0]!)
+        : n.type === "ContinueStatement" || (n.type === "ReturnStatement" && (!n.argument || ((n.argument as Node).type === "Literal" && ((n.argument as Node).value === false || (n.argument as Node).value === null)) || ((n.argument as Node).type === "ArrayExpression" && ((n.argument as Node).elements as Node[]).length === 0)));
+    // Counts the table doesn't read as a zone's cards, so no reference has the test (each with the reason).
+    const NOT_A_ZONE_COUNT: Record<string, string> = {
+      // The cards just looked at, chosen or milled (a list the effect holds, not a zone).
+      "BP03-107": "two zones spread into one list", "BP03-108": "two zones spread into one list", "BP04-041": "top cards", "BP05-054": "milled cards",
+      "BP09-050": "top / chosen cards", "BP14-039": "top cards", "BP14-071": "chosen cards", "BP15-072": "chosen cards", "BP17-099": "chosen cards",
+      "BP19-110": "top cards", "BP22-036": "the options of a choice", "CP01-006": "top cards", "CP01-070": "top cards", "CP01-080": "top cards",
+      // Reader methods the analysis doesn't read (face-up / face-down evolve deck, cards that left the field or were played this turn).
+      "BP08-053": "face-down evolve deck", "BP11-021": "face-up evolve deck", "BP13-110": "face-up evolve deck", "BP15-004": "face-up evolve deck",
+      "BP16-011": "cards that left the field this turn", "BP17-116": "face-down evolve deck", "BP17-T07": "cards played this turn", "CP03-029": "face-up evolve deck",
+      // Two zones spread into one list; a count with arithmetic.
+      "BP11-089": "two zones spread into one list", "BP12-074": "two zones spread into one list", "BP19-074": "a count with arithmetic",
+    };
+    const byFile = new Map<string, string[]>();
+    for (const [def, f] of scriptFiles()) byFile.set(f, [...(byFile.get(f) ?? []), def]);
+    const missing: string[] = [];
+    let found = 0;
+    for (const [f, defs] of byFile) {
+      const m = moduleOf(f);
+      walk(m.ast, (n) => {
+        let want: K | null = null;
+        if (n.type === "IfStatement" && !n.alternate && giveUp(n.consequent as Node)) {
+          const w = written(m, n.test as Node);
+          want = w && neg(w);
+        }
+        const key = n.type === "Property" ? ((n.key as Node).name as string) : "";
+        if (["condition", "triggerIf", "playableIf", "available", "canPay"].includes(key) && (n.value as Node).type === "ArrowFunctionExpression" && ((n.value as Node).body as Node).type !== "BlockStatement") want = written(m, (n.value as Node).body as Node);
+        if (!want) return true;
+        for (const def of defs) {
+          if (!table.known(def) || !ALL_SCRIPTS[def]) continue;
+          if (table.refsOf(def).some((r) => r.test && r.test.kind === want!.kind && r.test.n === want!.n && r.test.role !== "branch")) found += 1;
+          else if (!NOT_A_ZONE_COUNT[def]) missing.push(`${def}: ${textOf(m, n).replace(/\s+/g, " ").slice(0, 100)} → ${want!.kind} ${want!.n}`);
+        }
+        return true;
+      });
+    }
+    expect(missing).toEqual([]);
+    expect(found).toBeGreaterThan(140);
+  }, 120_000);
+
+  it("says where each reference's ability works, as Core does", () => {
+    const env = { db: engine.db } as unknown as Env;
+    let abilities = 0;
+    for (const def of Object.keys(table.file.refs)) {
+      const script = ALL_SCRIPTS[def]!;
+      for (const r of table.refsOf(def)) {
+        if (r.ability < 0) continue;
+        abilities += 1;
+        const core = [...abilityZones(env, def, (script.abilities![r.ability] ?? {}) as { validIn?: readonly ZoneName[] })];
+        // A guard on where the card itself is ("if (g.card(self)?.zone !== 'field') return") can only narrow it.
+        expect(r.from.every((z) => core.includes(z as ZoneName)), `${def} #${r.ability}`).toBe(true);
+        if (!table.refsOf(def).some((x) => x.ability === r.ability && x.from.length !== core.length)) expect(r.from, `${def} #${r.ability}`).toEqual(core);
+      }
+    }
+    expect(abilities).toBeGreaterThan(3000);
+    const from = (def: string, key: string) => table.refsOf(def).find((r) => r.ability === -1 && r.key === key)?.from;
+    // selfKeywords: Core reads it in every zone (BP13-033: five Levin cards in the cemetery give it Assail anywhere)...
+    expect(from("BP13-033", "selfKeywords")).toEqual([...PLAYER_ZONES]);
+    // ...unless its code checks where the card is (CSD02a-003: "if this isn't on the field, nothing").
+    expect(from("CSD02a-003", "selfKeywords")).toEqual(["field"]);
+    // A play option's cost is paid where the card is played from; an EX area passive works there; an equipment token's.
+    expect(from("BP08-037", "playOptions")).toEqual(["hand", "ex"]);
+    expect(from("BP13-003", "exPassives")).toEqual(["ex"]);
+    expect(from("BP13-003", "field")).toEqual(["field"]);
+    expect(from("CP04-T01", "equipment")).toEqual(["equipmentZone"]);
+    // An activated ability from the hand (BP11-058's discard cost) and from the cemetery (BP10-109's).
+    expect(table.refsOf("BP11-058").find((r) => r.where === "canPay")?.from).toEqual(["hand"]);
+    expect(table.refsOf("BP10-109").find((r) => r.where === "fromEvolveDeck")?.from).toEqual(["cemetery"]);
+    // A guard in a resolution on where the card is now doesn't move where it triggers (BP20-120: discarded from the hand, then
+    // "if this card is in your cemetery").
+    expect(table.refsOf("BP20-120").find((r) => r.where === "resolve")?.from).toEqual(["hand"]);
+    expect(Object.values(table.file.refs).flat().filter((r) => r.from.length === 0)).toEqual([]);
+  });
+
+  it("places every comparison, and matches names with a script's other names", () => {
+    const AVAIL = new Set(["target", "targetCondition", "choose", "search", "searchEach", "fromEvolveDeck", "topCard"]);
+    const deckDefs = new Set([...DECK_SETS.train, ...DECK_SETS.holdout].flatMap((name) => [...sampleDeck(name)!.deck.main, ...sampleDeck(name)!.deck.evolve].map((p) => engine.db.ofPrinting(p).id)));
+    const unplaced: string[] = [];
+    let partialPool = 0;
+    for (const def of Object.keys(table.file.refs)) {
+      for (const r of table.refsOf(def)) {
+        if (r.threshold && !r.test && !r.scaled && !AVAIL.has(r.where)) unplaced.push(def);
+        if (JSON.stringify(r.filter).includes('"why":"test"')) {
+          partialPool += 1;
+          if (deckDefs.has(def)) unplaced.push(`${def} (in a sample deck)`);
+        }
+      }
+    }
+    expect(unplaced).toEqual([]);
+    expect(partialPool).toBe(0);
+    // Every name compiled into definitions includes the definitions that also bear that name (alsoNames).
+    const also = new Map<string, string[]>();
+    for (const d of ALL_CARDS) for (const n of ALL_SCRIPTS[d.id]?.alsoNames ?? []) also.set(n, [...(also.get(n) ?? []), d.id]);
+    const defsAtoms = (f: RefFilter): string[][] => (f.t === "defs" ? [f.v] : f.t === "and" || f.t === "or" ? f.args.flatMap(defsAtoms) : f.t === "not" ? defsAtoms(f.arg) : []);
+    let checked = 0;
+    for (const [def, a] of analysis()) {
+      const names: string[] = [];
+      const walkNames = (f: { t: string; v?: unknown; args?: unknown[]; arg?: unknown }) => {
+        if (f.t === "name") names.push(f.v as string);
+        for (const x of (f.args ?? []) as never[]) walkNames(x);
+        if (f.arg) walkNames(f.arg as never);
+      };
+      a.refs.forEach((r) => walkNames(r.filter));
+      const compiled = table.refsOf(def).flatMap((r) => defsAtoms(r.filter)).flat();
+      for (const n of names) {
+        for (const other of also.get(n) ?? []) {
+          checked += 1;
+          expect(compiled, `${def}: ${n} → ${other}`).toContain(other);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(10);
+  }, 120_000);
 });

@@ -4,6 +4,7 @@ import { cardRuntimeDetails } from "./card-details";
 import { observePresentationEngine } from "./effect-context";
 import type { FromWorker } from "./protocol";
 import { DICE_TIMING } from "./dice-timing";
+import { freeUnionBurstProcessing } from "./processing";
 
 /**
  * Outside the online fingerprint: observe actual inputs and extend output. The underlying host
@@ -27,6 +28,8 @@ export function createPresentationHost(
     const cardDetails = cardRuntimeDetails(session.reader(), engine.scripts, message.update.view);
     const observer = observed.observers.get(session)!;
     const abilities = observer.presentation(message.update);
+    const decision = message.update.decision;
+    const fallback = decision && !decision.processing ? freeUnionBurstProcessing(engine, abilities.effectContext) : null;
     const diceSteps = observer.dice.drain(message.update.logReset);
     if (message.update.logReset) displayUntil = 0;
     else {
@@ -34,7 +37,7 @@ export function createPresentationHost(
       const budget = diceSteps.reduce((ms, step) => ms + (step.type === "throw" ? throwBudget : step.type === "prompt" ? DICE_TIMING.inquiry : 0), 0);
       if (budget) displayUntil = Math.max(displayUntil, Date.now()) + budget;
     }
-    send({ kind: "update", update: { ...message.update, cardDetails, ...abilities, diceSteps, diePrompt: observer.dice.prompt,
+    send({ kind: "update", update: { ...message.update, ...(decision && fallback ? { decision: { ...decision, processing: fallback } } : {}), cardDetails, ...abilities, diceSteps, diePrompt: observer.dice.prompt,
       handGains: observer.handGains.drain(message.update.logReset) } });
   }, paced, options);
   return host;

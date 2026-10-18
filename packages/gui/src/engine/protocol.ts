@@ -17,6 +17,9 @@ import type {
   PlayerView,
   PrintingId,
 } from "@sve/core";
+import type { TurnClockView } from "./turn-clock";
+
+export type { TurnClockView } from "./turn-clock";
 
 /**
  * Who plays a seat: a person at this screen, a bot run by the worker, or a person at another program (online play:
@@ -83,6 +86,19 @@ export interface GameOptions {
    * it (QuickAnnouncement). Pacing only. Replays saved without it replay as the core decides by default.
    */
   askEveryQuickWindow?: boolean;
+  /**
+   * Online play: each quick window is answered by its player's own program, also when passing is all that player can do
+   * (an input of their seat, sent to the other program), so the other side can't tell from the game whether they had a
+   * Quick card or ability to play (HostSettings.fakeQuick, skipQuick). Needs askEveryQuickWindow. Absent: both programs pass
+   * those windows themselves.
+   */
+  ownQuickWindows?: boolean;
+  /**
+   * Online play, the host's rule: each player's seconds for their turn and their answers in the other player's turn after it,
+   * given again at the start of each of their turns (engine/turn-clock.ts). Out of time, their program answers for them (the
+   * core's default answer: the turn ends). Absent: no limit.
+   */
+  turnLimit?: number;
   /** Who goes first (absent: as the rules say). */
   turnOrder?: TurnOrder;
   /**
@@ -90,6 +106,16 @@ export interface GameOptions {
    * since (both programs take them back together: "takeBack"). Absent: never.
    */
   allowUndo?: boolean;
+}
+
+/**
+ * A card just put into a hand where every player saw it (engine/reveals.ts): revealed when it was searched or taken from the
+ * deck (CR 5.8.1.2, 5.21.1), or taken from a cemetery (4.9.2). Its id in the hand, whose hand, and what it is.
+ */
+export interface ToHandCard {
+  player: PlayerId;
+  id: CardId;
+  card: CardInfo;
 }
 
 /** One input of a game, with the seat that gave it (null: not given by a seat). */
@@ -153,6 +179,19 @@ export interface HostSettings {
    * before the host passes it: the attack's arrow stands before its combat (0: at once). Needs askEveryQuickWindow.
    */
   attackPauseMs: number;
+  /**
+   * Online play (GameOptions.ownQuickWindows): a quick window of this person where passing is all they can do is passed after
+   * a pause like a person's (about a second), so the other player can't tell whether they had a Quick card.
+   */
+  fakeQuick: boolean;
+  /** Online play (GameOptions.ownQuickWindows): every quick window of this person is passed for them, Quick cards or not. */
+  skipQuick: boolean;
+  /**
+   * A card that went into a hand in public (GameUpdate.toHand) while the person at the screen can't see it there (the other
+   * player's hand): the bots' or the other program's next answer waits this long after it has landed (its flight may wait for
+   * an arrow pointing at it first: game/animation/plan.ts flightDelay), while the table shows it (0: no wait).
+   */
+  revealPauseMs: number;
 }
 
 export type ToWorker =
@@ -222,14 +261,50 @@ export interface AbilitySummary {
   custom?: boolean;
   quick?: boolean;
   advanced?: boolean;
+  /**
+   * The icon an advanced ability is printed with, when it isn't {[adv]} (高等起动 / アドバンス起動): a serve ability's {[feed]}
+   * (吃饭 / 食事, CR 14.2.2) or a Ride ability's {[ride]} (凭依 / 憑依, CR 14.4.9). The button says the card text's word.
+   */
+  advancedIcon?: "feed" | "ride";
+  /** CR 12.2 — an evolve ability. */
+  evolve?: boolean;
   /** A given ability (not printed on the card). */
   granted?: boolean;
   /**
-   * An automatic ability of its card: which of the card's abilities with this timing it is (0: the first, in its script's
-   * order) and how many the card has, to find its line of the card text (game/card/ability-text.ts).
+   * Which of its definition's abilities of its kind it is (0: the first, in its script's order) and how many there are — an
+   * automatic ability's timing; an evolve, an advanced or another activated ability — to find its paragraph of the card text
+   * (game/card/ability-text.ts).
    */
   rank?: number;
   count?: number;
+}
+
+/** An ability a decision is about (a pending one, the one being played): how it reads, and what tells its text. */
+export interface AbilityInfo extends AbilitySummary {
+  source?: CardId;
+  /** The definition providing it, with the pseudo ids of keyword ("kw:"), given ("grant:") and equipment ("equip:") abilities. */
+  sourceDef?: DefId;
+  /** A keyword's ability (Drain, Single Drive, Stack ...): which keyword. */
+  keyword?: string;
+  /** A given or an equipment token's ability: the card whose text quotes it, when that can be told. */
+  giver?: DefId;
+}
+
+/**
+ * The card or ability a decision is part of (CR 10.6.2), when the host can tell (engine/processing.ts): a card being played
+ * (how it is played, its costs, a spell's effect) or an ability being played (its choices, targets, costs, effect). Public by
+ * then (CR 10.6.2.1, 10.6.2.1.1).
+ */
+export interface ProcessingInfo {
+  kind: "card" | "ability";
+  controller: PlayerId;
+  /** The card being played (in the resolution zone), or the card whose ability it is (what it is now, if it moved). */
+  source: CardId;
+  card: CardInfo;
+  /** An ability: what it is. */
+  ability?: AbilityInfo;
+  /** A card being played another way: the play option chosen (CR 10.4.7.3), its label in the core's words. */
+  playOption?: { id: string; label: string };
 }
 
 /** What a person may do by hand now (manual debugging, at a main phase decision of a game that allows it). */
@@ -246,7 +321,9 @@ export interface DecisionInfo {
   /** Every card the decision mentions that its player may see. */
   cards: Record<CardId, CardInfo>;
   /** Activated abilities (`card:ability`) and pending automatic abilities (their pending id). */
-  abilities: Record<string, AbilitySummary & { source?: CardId; sourceDef?: DefId }>;
+  abilities: Record<string, AbilityInfo>;
+  /** What the decision is part of, when it is part of playing a card or ability and the host can tell. */
+  processing?: ProcessingInfo;
 }
 
 /** A choice made by a "choose" decision: its options and the chosen ones (options of a card, 5.18; X; a token ...). */
@@ -293,6 +370,11 @@ export interface LogEntry {
   turn: number;
   event: GameEvent;
   cards: Record<CardId, CardInfo>;
+  /**
+   * An ability played (abilityPlayed): its kind (CR 10.1.1), which only the engine's scripts tell, and whether it is an
+   * evolve ability (an activated one, CR 12.2.1). Absent for other events, and in older messages.
+   */
+  ability?: Pick<AbilitySummary, "kind" | "evolve">;
 }
 
 export interface GameUpdate {
@@ -308,6 +390,11 @@ export interface GameUpdate {
   announcement: QuickAnnouncement | null;
   /** Cards the person just looked at, shown before the game goes on (null: nothing to show). */
   looked: LookedCards | null;
+  /**
+   * Cards this update put into a hand in public, still there (ToHandCard): the table shows each a moment, the other player's
+   * face up. Public information only, once. Absent in older messages.
+   */
+  toHand?: ToHandCard[];
   /** A replay being watched (null: a game being played). */
   watch: WatchState | null;
   /**
@@ -315,12 +402,28 @@ export interface GameUpdate {
    * who watches the two players' programs), and whether the games differ. In a room that allows taking answers back
    * (`allowUndo`), `undo` is where "undo my last answer" goes back to: this person's last answer, while the other player
    * hasn't answered since and the game goes on (null: not now). A spectator may see both players' hidden cards
-   * (`revealAllowed`: the host lets it; it turns on "reveal all" for that).
+   * (`revealAllowed`: the host lets it; it turns on "reveal all" for that). `clock`: the players' time in a game with a turn
+   * time limit (GameOptions.turnLimit; null: none).
    */
-  online: { seat: PlayerId | null; remote: PlayerId | null; desync: string | null; spectating: boolean; allowUndo: boolean; undo: number | null; revealAllowed: boolean } | null;
+  online: {
+    seat: PlayerId | null;
+    remote: PlayerId | null;
+    desync: string | null;
+    spectating: boolean;
+    allowUndo: boolean;
+    undo: number | null;
+    revealAllowed: boolean;
+    clock: TurnClockView | null;
+  } | null;
   /** Whose view this is (the human's seat; in hot seat, the player who must decide). */
   perspective: PlayerId;
   view: PlayerView;
+  /**
+   * CR 10.4.4.1 — the viewer's own cards in their hand and EX area that would cost another number of play points to play
+   * normally now than their cost (reductions, increases in force): card → play points. Only theirs (a cost may depend on its
+   * owner's hand). Absent in older messages.
+   */
+  playCosts?: Record<CardId, number>;
   decision: DecisionInfo | null;
   waitingFor: PlayerId | null;
   /** A bot is about to answer. */

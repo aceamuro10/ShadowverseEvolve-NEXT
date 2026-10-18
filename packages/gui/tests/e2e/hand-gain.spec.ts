@@ -82,7 +82,7 @@ test("one's own six-card recovery does not display a notice", async ({ page }) =
   await expect(page.locator(".sve-decision")).toHaveAttribute("data-decision", "mainPhase");
 });
 
-test("public deck returns and evolve resets share the nonmodal panel and replace its previous result", async ({ page }) => {
+test("public deck returns use the nonmodal panel; evolve resets leave its notice unchanged", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await prepare(page, ["BP03-030", "BP06-117"]);
   await manual(page, "search", "BP02-031");
@@ -108,10 +108,10 @@ test("public deck returns and evolve resets share the nonmodal panel and replace
   await expect(page.getByTestId("table-end")).toBeEnabled();
   await manual(page, "search", "BP06-117");
   await manual(page, "play", "BP06-117", 1);
-  await expect(notice).toHaveAttribute("data-to", "evolveDeck");
-  await expect(notice).toContainText("placed the following cards facedown in their evolve deck");
-  await expect(page.getByTestId("hand-gain-card")).toHaveCount(1);
-  await expect(notice.locator('[data-def="BP02-032"]')).toHaveCount(1);
+  await expect(notice).toHaveAttribute("data-to", "deck");
+  await expect(notice).toContainText("put the following cards back into their deck");
+  await expect(page.getByTestId("hand-gain-card")).toHaveCount(2);
+  await expect(notice.locator('[data-def="BP02-032"]')).toHaveCount(0);
   await page.setViewportSize({ width: 844, height: 390 });
   await expect(notice).toBeInViewport();
   await page.screenshot({ path: test.info().outputPath("hidden-zone-notice-small.png") });

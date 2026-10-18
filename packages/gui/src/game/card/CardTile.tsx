@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent, ReactNode } from "react";
-import type { CardView, HiddenCardView, PlayerSideView } from "@sve/core";
+import type { CardId, CardView, HiddenCardView, PlayerSideView } from "@sve/core";
 import { cardName } from "../../app/catalog";
 import { useSettings } from "../../app/settings";
 import { useApp } from "../../app/store";
@@ -22,6 +22,8 @@ interface Props {
   card?: CardView | HiddenCardView | null;
   /** A card known only by definition (a decision's candidate in a hidden zone, a deck list). */
   info?: CardInfo | null;
+  /** The game's card drawn by `info` (a hidden card being shown face up): its id for the table's animations. */
+  cardId?: CardId;
   /** The side the card is on (to show an evolved follower's evolve card). */
   side?: PlayerSideView;
   size?: "small" | "normal" | "large";
@@ -39,10 +41,9 @@ interface Props {
   exact?: boolean;
 }
 
-const MAX_KEYWORDS = 4;
-const DENSE_KEYWORDS = 8;
+const MAX_KEYWORDS = 3;
 
-export function CardTile({ card, info, side, size = "normal", mark = null, onClick, onPointerDown, className, style, children, evolveBack = false, exact = false }: Props) {
+export function CardTile({ card, info, cardId, side, size = "normal", mark = null, onClick, onPointerDown, className, style, children, evolveBack = false, exact = false }: Props) {
   const catalog = useApp((s) => s.catalog);
   const update = useApp((s) => s.update);
   const { cardLang, uiLang } = useSettings();
@@ -75,8 +76,7 @@ export function CardTile({ card, info, side, size = "normal", mark = null, onCli
   if (mark) classes.push(`sve-card-${mark}`);
   if (highlighted) classes.push("sve-card-highlight");
   if (onClick) classes.push("sve-card-clickable");
-  const playCost = normalPlayCost(update, view);
-  const cost = playCost ?? (view ? view.cost : (def?.cost ?? null));
+  const cost = normalPlayCost(update, view) ?? (view ? view.cost : (def?.cost ?? null));
   const attack = view ? view.attack : (def?.attack ?? null);
   const defense = view ? view.defense : (def?.defense ?? null);
   const compare = (now: number | null, printed: number | null | undefined) =>
@@ -86,7 +86,7 @@ export function CardTile({ card, info, side, size = "normal", mark = null, onCli
   return (
     <div
       className={classes.join(" ")}
-      data-card={view?.id}
+      data-card={view?.id ?? cardId}
       data-def={shown.def}
       title={name}
       style={style}
@@ -107,10 +107,10 @@ export function CardTile({ card, info, side, size = "normal", mark = null, onCli
           ) : null}
           {attack !== null ? <span className={`sve-stat sve-stat-atk${compare(attack, def?.attack)}`}>{attack}</span> : null}
           {defense !== null ? <span className={`sve-stat sve-stat-def${compare(defense, def?.defense)}`}>{defense}</span> : null}
-          {keywords.length > 0 ? (
-            <div className={`sve-card-keywords${keywords.length >= DENSE_KEYWORDS ? " sve-card-keywords-dense" : ""}`}>
+          {keywords.length > 0 && size !== "small" ? (
+            <div className="sve-card-keywords">
               {keywords.slice(0, MAX_KEYWORDS).map((k) => (
-                <span key={k} className={`sve-kw sve-kw-${k}`} aria-label={t(`keyword.${k}` as const)}>
+                <span key={k} className={`sve-kw sve-kw-${k}`}>
                   {t(`keyword.${k}` as const)}
                 </span>
               ))}

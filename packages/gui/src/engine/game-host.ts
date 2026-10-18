@@ -27,6 +27,7 @@ import {
   type PlayerView,
 } from "@sve/core";
 import type {
+  AbilityInfo,
   AbilitySummary,
   CardInfo,
   ChoiceMade,
@@ -38,19 +39,28 @@ import type {
   LogEntry,
   LookedCards,
   ManualInfo,
+  ProcessingInfo,
   QuickAnnouncement,
   RecordedInput,
   Replay,
   SeatController,
+  ToHandCard,
   ToWorker,
   WatchState,
 } from "./protocol";
 import { knownController } from "./protocol";
-import { forEachCard, withoutMemory } from "./view-utils";
+import { abilityOf, normalPlayCost, PSEUDO_DEF } from "./core-internals";
+import { ProcessingTracker } from "./processing";
+import { flightDelay, planFlights, planTimeline } from "../game/animation/plan";
+import { revealedToHand, type Revealing } from "./reveals";
+import { TurnClock } from "./turn-clock";
+import { findCard, forEachCard, withoutMemory } from "./view-utils";
 
 export interface Scheduler {
   /** Run `fn` after `ms` milliseconds; the returned function cancels it. */
   schedule(fn: () => void, ms: number): () => void;
+  /** The time now in milliseconds (the turn clock's; absent: Date.now). */
+  now?(): number;
 }
 
 export const timerScheduler: Scheduler = {
@@ -58,7 +68,14 @@ export const timerScheduler: Scheduler = {
     const timer = setTimeout(fn, ms);
     return () => clearTimeout(timer);
   },
+  now: () => Date.now(),
 };
+
+/**
+ * How long a person takes to pass a quick window they have nothing to play in (HostSettings.fakeQuick): about a second,
+ * from half a second to a second and a half, most often near the middle.
+ */
+const fakeQuickPause = (): number => Math.round(500 + 500 * (Math.random() + Math.random()));
 
 interface Bot {
   decide(game: GameSession): Answer;
@@ -78,8 +95,8 @@ function makeBot(engine: Engine, controller: SeatController, seed: string, seat:
   return null;
 }
 
-/** How an ability reads on a button (the GUI words it). */
-export function summarizeAbility(ability: AbilityDef | undefined, def: DefId): AbilitySummary {
+/** How an ability reads on a button (the GUI words it). `engine` tells an advanced ability's icon from its card's text. */
+export function summarizeAbility(ability: AbilityDef | undefined, def: DefId, engine?: Engine): AbilitySummary {
   const granted = def.includes(":") ? { granted: true } : {};
   if (!ability) return { kind: "unknown", ...granted };
   if (ability.kind === "activated") {
@@ -92,7 +109,8 @@ export function summarizeAbility(ability: AbilityDef | undefined, def: DefId): A
       ...(cost.leaderDefense ? { leaderDefense: cost.leaderDefense } : {}),
       ...(cost.custom ? { custom: true } : {}),
       ...(ability.quick ? { quick: true } : {}),
-      ...(ability.advanced ? { advanced: true } : {}),
+      ...(ability.advanced ? { advanced: true, ...advancedIconOf(engine, def, ability) } : {}),
+      ...(ability.evolve ? { evolve: true } : {}),
       ...granted,
     };
   }
@@ -101,14 +119,56 @@ export function summarizeAbility(ability: AbilityDef | undefined, def: DefId): A
 }
 
 /**
- * Which of its card's automatic abilities with the same timing an ability is, and how many there are (a choice between
- * pending abilities shows each one's line of the card text, game/card/ability-text.ts); nothing for another kind.
+ * The scripts write serve (CR 14.2.2) and Ride (14.4.9) abilities as advanced activated abilities (serveAbility, rideAbility):
+ * which icon this one is printed with, its definition's icons in its advanced abilities' order (CardDefinition.advancedIcons,
+ * which the data build reads from the text). Nothing for {[adv]} or a given ability.
+ */
+function advancedIconOf(engine: Engine | undefined, def: DefId, ability: AbilityDef): Pick<AbilitySummary, "advancedIcon"> {
+  const icons = engine?.db.has(def) ? engine.db.get(def).advancedIcons : undefined;
+  if (!icons) return {};
+  const rank = (engine!.scripts[def]?.abilities ?? []).filter((a) => a.kind === "activated" && a.advanced).indexOf(ability);
+  const icon = icons[Math.max(rank, 0)] ?? icons[0];
+  return icon === "feed" || icon === "ride" ? { advancedIcon: icon } : {};
+}
+
+/** The kind an ability's paragraph of the card text is found by (game/card/ability-text.ts): its timing, its kind of activated ability. */
+export function textGroupOf(ability: AbilityDef): string {
+  if (ability.kind === "automatic") return ability.timing;
+  if (ability.kind === "spell") return "spell";
+  return ability.evolve ? "evolve" : ability.advanced ? "advanced" : "activated";
+}
+
+/**
+ * Which of its definition's abilities of the same kind (textGroupOf) an ability is, and how many there are: a choice between
+ * pending abilities, and a decision asked while one is played, show its paragraph of the card text (ability-text.ts). Nothing
+ * for a spell (its text is the card's).
  */
 export function rankOf(abilities: readonly AbilityDef[], index: number): Pick<AbilitySummary, "rank" | "count"> {
   const ability = abilities[index];
-  if (ability?.kind !== "automatic") return {};
-  const same = (a: AbilityDef | undefined) => a?.kind === "automatic" && a.timing === ability.timing;
+  if (!ability || ability.kind === "spell") return {};
+  const group = textGroupOf(ability);
+  const same = (a: AbilityDef | undefined) => a !== undefined && a.kind !== "spell" && textGroupOf(a) === group;
   return { rank: abilities.slice(0, index).filter(same).length, count: abilities.filter(same).length };
+}
+
+/**
+ * CR 10.4.4.1 — what playing each of the viewer's own cards in their hand and EX area normally costs now, where that isn't the
+ * card's cost (the core's own reckoning, core-internals.ts): the card panel shows it (GameUpdate.playCosts). Nobody else's: a
+ * cost may depend on its owner's hand.
+ */
+export function playCostsOf(engine: Engine, game: GameSession, viewer: PlayerId, view: PlayerView): Record<CardId, number> {
+  const out: Record<CardId, number> = {};
+  const side = view.players[viewer];
+  for (const card of [...side.hand, ...side.ex]) {
+    if (card.hidden || card.cost === null) continue;
+    try {
+      const cost = normalPlayCost(engine, game, card.id, viewer);
+      if (cost !== card.cost) out[card.id] = cost;
+    } catch {
+      // Display only: a card the core can't price now just shows its cost.
+    }
+  }
+  return out;
 }
 
 /** GameConfig.firstPlayer for a game's turn order: a given player, one drawn from the seed ("random"), or null (CR 6.2.1.6). */
@@ -210,8 +270,27 @@ export class GameHost {
   private options: GameOptions | null = null;
   private inputs: RecordedInput[] = [];
   private bots: [Bot | null, Bot | null] = [null, null];
-  private settings: HostSettings = { botDelayMs: 600, revealAll: false, paused: false, manualDebug: false, announceQuick: false, attackPauseMs: 0 };
+  private settings: HostSettings = {
+    botDelayMs: 600,
+    revealAll: false,
+    paused: false,
+    manualDebug: false,
+    announceQuick: false,
+    attackPauseMs: 0,
+    fakeQuick: false,
+    skipQuick: false,
+    revealPauseMs: 0,
+  };
   private cancelTimer: (() => void) | null = null;
+  /** Online play with a turn time limit (GameOptions.turnLimit): the players' time, the game it counts (its seed), its alarm. */
+  private clock: TurnClock | null = null;
+  private clockGame: string | null = null;
+  private cancelClock: (() => void) | null = null;
+  /**
+   * Online play: the inputs this program gave for its person by itself (quick windows passed, answers out of time), by index.
+   * They are that person's answers for the other program; "undo my last answer" goes past them.
+   */
+  private readonly automatic = new Set<number>();
   /** Log entries not sent yet. */
   private log: LogEntry[] = [];
   private logReset = false;
@@ -230,6 +309,18 @@ export class GameHost {
   private looked: LookedCards | null = null;
   private lookedSeq = 0;
   private seeing: { player: PlayerId; cards: Map<CardId, CardInfo> } | null = null;
+  /**
+   * Cards put into a hand in public (engine/reveals.ts): what is revealed now, those not published yet, and until when the
+   * table is showing one the person can't see there (HostSettings.revealPauseMs): a bot's or the other program's next answer
+   * waits until then. A time, not a flag: what waits for it waits for the rest of it, never for it again. `revealFor`: how
+   * long it was set for (what is left is never more, whatever the computer's clock does meanwhile).
+   */
+  private readonly revealing: Revealing = new Map();
+  private toHand: ToHandCard[] = [];
+  private revealUntil = 0;
+  private revealFor = 0;
+  /** What the decisions are part of (engine/processing.ts): display only. */
+  private readonly processing = new ProcessingTracker();
   /** Inputs played again (rewind, replays) are not announced. */
   private replaying = false;
   /** A quick window after an attack is being shown before the host passes it (HostSettings.attackPauseMs). */
@@ -366,6 +457,14 @@ export class GameHost {
     this.game = game;
     this.options = options;
     this.inputs = [];
+    // A new game's clock, and nothing answered by itself yet. The same game again (answers taken back, a spectator coming
+    // back) keeps the time used: taking answers back gives no time back.
+    if (this.clockGame !== options.seed) {
+      this.clockGame = options.seed;
+      this.automatic.clear();
+      const online = !this.watching && options.controllers.includes("remote");
+      this.clock = online && options.turnLimit ? new TurnClock(options.turnLimit * 1000, () => this.now()) : null;
+    }
     // Watching, nobody plays: the replay's inputs are its answers.
     this.bots = this.watching
       ? [null, null]
@@ -379,6 +478,11 @@ export class GameHost {
     this.announcement = null;
     this.looked = null;
     this.seeing = null;
+    this.revealing.clear();
+    this.toHand = [];
+    this.revealUntil = 0;
+    this.revealFor = 0;
+    this.processing.reset();
     this.remoteQueue = new Map();
     this.desync = null;
     this.record(game.startupEvents);
@@ -396,12 +500,20 @@ export class GameHost {
     }
     this.replaying = false;
     this.quick = null;
+    for (const index of [...this.automatic]) if (index >= this.inputs.length) this.automatic.delete(index);
     this.pump();
+  }
+
+  /** The time now (ms): the scheduler's (tests set it), or the computer's. */
+  private now(): number {
+    return this.scheduler.now?.() ?? Date.now();
   }
 
   private answer(seat: PlayerId, answer: Answer): void {
     // The other program is being asked to take an answer back: this person's next one waits for what it says.
     if (this.hold && !this.isRemote(seat)) return;
+    // Out of time (GameOptions.turnLimit): this program answers for them now.
+    if (this.clock?.out(seat) && !this.isRemote(seat)) return;
     const game = this.game;
     const decision = game?.decision;
     if (!game || !decision) return this.error("there is no decision to answer");
@@ -468,11 +580,15 @@ export class GameHost {
     const remotes = this.remotes();
     if (!this.options?.allowUndo || remotes.length !== 1 || this.desync || this.hold || this.game?.isOver) return null;
     const mine = opponentOf(remotes[0]!);
+    // Out of time, this program answers for them: nothing to take back.
+    if (this.clock?.out(mine)) return null;
     for (let i = this.inputs.length - 1; i >= 0; i--) {
       const { by, input } = this.inputs[i]!;
+      // The engine's passes, and this program's own for its person.
+      if (by === null || this.automatic.has(i)) continue;
       if (by === mine) return input.type === "concede" ? null : i;
       // The other player answered since.
-      if (by !== null) return null;
+      return null;
     }
     return null;
   }
@@ -528,17 +644,38 @@ export class GameHost {
     const decision = game.decision;
     this.rememberVisible();
     this.followAnswer(decision, input);
+    this.track(() => this.processing.beforeInput(game, input));
     const events = game.act(input, by ?? undefined);
     this.inputs.push({ input, by });
+    this.track(() => this.processing.afterInput(game, events));
     this.record(events);
     this.followEvents(events);
     this.followLooks(events);
+    // Followed in inputs played again too (what is revealed goes on), shown only from the game being played.
+    const added = revealedToHand(events, this.revealing);
+    if (!this.replaying) this.toHand.push(...added);
+  }
+
+  /** How much longer the table shows a card put into a hand in public (revealUntil); 0 when it doesn't. */
+  private revealLeft(): number {
+    return Math.min(this.revealFor, Math.max(0, this.revealUntil - this.now()));
+  }
+
+  /** Follow what the decisions are part of (display only): a failure there forgets it, and never stops the game. */
+  private track(step: () => void): void {
+    try {
+      step();
+    } catch {
+      this.processing.reset();
+    }
   }
 
   /**
    * Publish the state; if a bot must answer, answer after the delay. A quick play that has resolved is announced first, and
    * everything waits until a person has seen it ("acknowledge"); quick windows where passing is all a player can do are
-   * passed here, as the core's autoResolve would (GameOptions.askEveryQuickWindow).
+   * passed here, as the core's autoResolve would (GameOptions.askEveryQuickWindow) — online, by each player's own program
+   * when it answers its person's windows (GameOptions.ownQuickWindows: ownAnswer). Out of time, a player's program answers
+   * for them (GameOptions.turnLimit).
    */
   private pump(): void {
     this.stopTimer();
@@ -550,9 +687,38 @@ export class GameHost {
     this.settleLook();
     if (game.isOver) this.announcement = null;
     for (;;) {
+      this.tick();
+      // Out of time: what this person hasn't seen yet doesn't hold the game.
+      if (this.localOutOfTime()) {
+        this.announcement = null;
+        this.looked = null;
+      }
       const decision = game.decision;
       if (this.announcement || this.looked || this.desync || !decision) break;
-      if (onlyPass(decision)) {
+      const own = this.ownAnswer(decision);
+      if (own && own.delay > 0) {
+        // A person's pause (or the attack's): the window isn't shown to this person meanwhile, the other program waits.
+        const seat = decision.player;
+        this.passing = true;
+        this.publish(false);
+        this.cancelTimer = this.scheduler.schedule(() => {
+          this.cancelTimer = null;
+          this.passing = false;
+          this.revealUntil = 0;
+          if (this.answerFor(seat, own.answer)) this.pump();
+        }, Math.max(own.delay, this.revealLeft()));
+        this.armClock();
+        return;
+      }
+      if (own) {
+        if (!this.answerFor(decision.player, own.answer)) return;
+        this.settleQuick();
+        this.settleLook();
+        continue;
+      }
+      // Online, each window is its player's program's to answer; with nobody else's program here (an online game's replay
+      // going on at one screen), the host passes them as before.
+      if (onlyPass(decision) && !(this.options?.ownQuickWindows && this.remotes().length > 0)) {
         // After an attack is declared (CR 8.4.5-8.4.7), the table shows it a moment before its combat.
         if (decision.type === "quick" && decision.timing === "attack" && this.settings.attackPauseMs > 0) {
           this.passing = true;
@@ -560,13 +726,14 @@ export class GameHost {
           this.cancelTimer = this.scheduler.schedule(() => {
             this.cancelTimer = null;
             this.passing = false;
+            this.revealUntil = 0;
             try {
               this.apply({ type: "quick", action: { type: "pass" } }, null);
             } catch (err) {
               return this.error(err);
             }
             this.pump();
-          }, this.settings.attackPauseMs);
+          }, Math.max(this.settings.attackPauseMs, this.revealLeft()));
           return;
         }
         try {
@@ -583,6 +750,18 @@ export class GameHost {
       const index = this.inputs.length;
       const next = this.remoteQueue.get(index);
       if (!next) break;
+      // A card the other program's answers just put into a hand in public is shown before its next answer is played.
+      if (this.toHand.length > 0 && this.settings.revealPauseMs > 0) this.publish(false);
+      const left = this.revealLeft();
+      if (left > 0) {
+        this.cancelTimer = this.scheduler.schedule(() => {
+          this.cancelTimer = null;
+          this.revealUntil = 0;
+          this.pump();
+        }, left);
+        this.armClock();
+        return;
+      }
       this.remoteQueue.delete(index);
       if (next.hash !== stateHash(game.state)) {
         this.desync = `${index + 1}`;
@@ -603,12 +782,74 @@ export class GameHost {
     const thinking = decision !== null && !this.announcement && !this.looked && this.bots[decision.player] !== null && !this.settings.paused;
     this.publish(thinking);
     // A bot answers a decision with a single answer (a main phase it can only end) without the pause.
-    if (thinking) this.cancelTimer = this.scheduler.schedule(() => this.stepBot(), forcedAnswer(decision) ? 0 : this.settings.botDelayMs);
+    if (thinking) this.cancelTimer = this.scheduler.schedule(() => this.stepBot(), Math.max(forcedAnswer(decision) ? 0 : this.settings.botDelayMs, this.revealLeft()));
+    this.armClock();
+  }
+
+  /**
+   * Online play: an answer this program gives for its person by itself, and after how long. Out of time, the core's default
+   * answer at once (it ends the turn, passes, declines, selects as few as allowed). With GameOptions.ownQuickWindows, a
+   * quick window where passing is all they can do — or any, when they skip quick windows (HostSettings.skipQuick) — is
+   * passed after a person's pause (fakeQuick) or the attack's pause. Not while an answer is being taken back (hold).
+   */
+  private ownAnswer(decision: Decision): { answer: Answer; delay: number } | null {
+    const seat = decision.player;
+    if (this.remotes().length !== 1 || this.isRemote(seat) || this.bots[seat] || this.hold) return null;
+    if (this.clock?.out(seat)) return { answer: defaultAnswer(decision), delay: 0 };
+    if (!this.options?.ownQuickWindows || decision.type !== "quick" || !(onlyPass(decision) || this.settings.skipQuick)) return null;
+    const attack = decision.timing === "attack" ? this.settings.attackPauseMs : 0;
+    return { answer: { type: "quick", action: { type: "pass" } }, delay: this.settings.fakeQuick ? Math.max(attack, fakeQuickPause()) : attack };
+  }
+
+  /** This program's answer for its person: played and sent to the other program as theirs; false when it failed (said). */
+  private answerFor(seat: PlayerId, answer: Answer): boolean {
+    const sent = this.outgoing();
+    const index = this.inputs.length;
+    try {
+      this.apply(answer, seat);
+    } catch (err) {
+      this.error(err);
+      return false;
+    }
+    this.automatic.add(index);
+    sent?.(answer);
+    return true;
+  }
+
+  /** The turn clock follows the game (online play with a turn time limit): whose time runs from now. */
+  private tick(): void {
+    const game = this.game;
+    if (!this.clock || !game || this.replaying) return;
+    const state = game.state;
+    this.clock.follow({ turn: state.phase === "setup" ? 0 : state.turn, active: state.activePlayer, deciding: game.decision?.player ?? null, over: game.isOver });
+  }
+
+  /** Whether the time running is this program's person's, and it is out. */
+  private localOutOfTime(): boolean {
+    const running = this.clock?.runningFor;
+    return running !== null && running !== undefined && this.remotes().length === 1 && !this.isRemote(running) && this.clock!.out(running);
+  }
+
+  /** Online play with a turn time limit: come back when this person's time runs out (their program answers for them then). */
+  private armClock(): void {
+    this.cancelClock?.();
+    this.cancelClock = null;
+    const clock = this.clock;
+    const running = clock?.runningFor;
+    if (!clock || running === null || running === undefined || this.remotes().length !== 1 || this.isRemote(running) || this.game?.isOver) return;
+    const left = clock.timeLeft(running);
+    if (left > 0) {
+      this.cancelClock = this.scheduler.schedule(() => {
+        this.cancelClock = null;
+        this.pump();
+      }, left + 1);
+    }
   }
 
   /** One bot answer (also the debug "step" while bots are paused). A failing bot gives the core's safe default answer. */
   private stepBot(): void {
     this.cancelTimer = null;
+    this.revealUntil = 0;
     const game = this.game;
     const decision = game?.decision;
     if (!game || !decision) return;
@@ -660,8 +901,9 @@ export class GameHost {
     for (const [i, { input, by }] of replay.inputs.entries()) {
       const decision = game.decision;
       if (!decision || game.isOver) break;
-      // A step goes to after each answer of a player, and after the quick window of each attack (its combat).
-      const stop = by !== null || (decision.type === "quick" && decision.timing === "attack");
+      // A step goes to after each answer of a player, and after the quick window of each attack (its combat). A window where
+      // passing was all a player could do, passed by their program (GameOptions.ownQuickWindows), is no answer of theirs.
+      const stop = (by !== null && !onlyPass(decision)) || (decision.type === "quick" && decision.timing === "attack");
       let events: readonly GameEvent[];
       try {
         events = game.act(input, by ?? undefined);
@@ -692,14 +934,17 @@ export class GameHost {
   /** How long the table stays before the next input is played (at the normal speed). */
   private watchPause(next: RecordedInput): number {
     const decision = this.game!.decision;
-    if (this.announcement) return 1800; // a Quick play: time to read its window
-    if (next.by === null) return decision?.type === "quick" && decision.timing === "attack" ? 600 : 0; // the attack stands a moment
-    return decision?.type === "mainPhase" || decision?.type === "quick" ? 1100 : 700;
+    if (this.announcement) return Math.max(1800, this.revealLeft()); // a Quick play: time to read its window
+    // The engine's passes, and a player's where passing was all they could do: the attack stands a moment.
+    const pause = next.by === null || (decision && onlyPass(decision)) ? (decision?.type === "quick" && decision.timing === "attack" ? 600 : 0) : decision?.type === "mainPhase" || decision?.type === "quick" ? 1100 : 700;
+    // A card put into a hand in public: the time the table shows it.
+    return Math.max(pause, this.revealLeft());
   }
 
   /** Play the replay's inputs up to `position` (with the animations of what they do). */
   private watchInputs(position: number): void {
     this.cancelTimer = null;
+    this.revealUntil = 0;
     const watching = this.watching;
     const game = this.game;
     if (!watching || !game) return;
@@ -757,8 +1002,9 @@ export class GameHost {
     const remotes = this.remotes();
     if (remotes.length === 0) return null;
     const allowUndo = !!this.options?.allowUndo;
-    if (remotes.length === 2) return { seat: null, remote: null, desync: this.desync, spectating: true, allowUndo, undo: null, revealAllowed: this.spectatorReveal };
-    return { seat: opponentOf(remotes[0]!), remote: remotes[0]!, desync: this.desync, spectating: false, allowUndo, undo: this.undoPoint(), revealAllowed: false };
+    const clock = this.clock?.view() ?? null;
+    if (remotes.length === 2) return { seat: null, remote: null, desync: this.desync, spectating: true, allowUndo, undo: null, revealAllowed: this.spectatorReveal, clock };
+    return { seat: opponentOf(remotes[0]!), remote: remotes[0]!, desync: this.desync, spectating: false, allowUndo, undo: this.undoPoint(), revealAllowed: false, clock };
   }
 
   private watchState(): WatchState | null {
@@ -971,7 +1217,8 @@ export class GameHost {
     const decision = game.decision;
     if (!decision || this.bots[decision.player] || this.passing || this.watching || this.isRemote(decision.player)) return null;
     const visible = new Map<CardId, CardInfo>();
-    forEachCard(game.view(decision.player), (card) => visible.set(card.id, { def: card.def, printing: card.printing }));
+    const view = game.view(decision.player);
+    forEachCard(view, (card) => visible.set(card.id, { def: card.def, printing: card.printing }));
     const cards: Record<CardId, CardInfo> = {};
     const add = (id: CardId | null | undefined, def?: DefId): void => {
       if (!id || cards[id]) return;
@@ -985,7 +1232,7 @@ export class GameHost {
     const reader = game.reader();
     const activated = (card: CardId, ability: number): void => {
       const ref = reader.info(card).abilities[ability];
-      abilities[`${card}:${ability}`] = summarizeAbility(ref?.ability, ref?.def ?? "");
+      abilities[`${card}:${ability}`] = summarizeAbility(ref?.ability, ref?.def ?? "", this.engine);
     };
     switch (decision.type) {
       case "chooseTurnOrder":
@@ -1024,14 +1271,7 @@ export class GameHost {
           const pending = game.state.pending.find((p) => p.id === id);
           if (!pending) continue;
           add(pending.source, pending.sourceDef.includes(":") ? undefined : pending.sourceDef);
-          const all = this.engine.scripts[pending.sourceDef]?.abilities ?? [];
-          const ability = all[pending.ability];
-          abilities[id] = {
-            ...summarizeAbility(ability, pending.sourceDef),
-            ...rankOf(all, pending.ability),
-            source: pending.source,
-            sourceDef: pending.sourceDef,
-          };
+          abilities[id] = this.abilityInfo(pending.source, pending.sourceDef, pending.ability, view);
         }
         break;
       case "selectCards":
@@ -1049,7 +1289,54 @@ export class GameHost {
         add(decision.source);
         break;
     }
-    return { decision, cards, abilities };
+    const processing = this.processingInfo(decision, view, visible);
+    return { decision, cards, abilities, ...(processing ? { processing } : {}) };
+  }
+
+  /**
+   * An ability named by its definition and index (a pending one, one being played): how it reads, which one of its kind it is,
+   * a keyword's ability's keyword, and the card that gave it (a given one: by the card's gifts in `view`, when one card did;
+   * an equipment token's: the token).
+   */
+  private abilityInfo(source: CardId, def: DefId, index: number, view: PlayerView): AbilityInfo {
+    const info: AbilityInfo = { ...summarizeAbility(abilityOf(this.engine, def, index), def, this.engine), source, sourceDef: def };
+    if (def.startsWith(PSEUDO_DEF.keyword)) info.keyword = def.slice(PSEUDO_DEF.keyword.length);
+    else if (def.startsWith(PSEUDO_DEF.grant)) {
+      const grant = def.slice(PSEUDO_DEF.grant.length);
+      const givers = [...new Set(findCard(view, source)?.gifts.filter((g) => g.ability === grant).map((g) => g.by) ?? [])];
+      if (givers.length === 1) info.giver = givers[0]!;
+    } else {
+      const token = def.startsWith(PSEUDO_DEF.equipment) ? def.slice(PSEUDO_DEF.equipment.length) : null;
+      if (token) info.giver = token;
+      Object.assign(info, rankOf((token ? this.engine.scripts[token]?.equipment?.abilities : this.engine.scripts[def]?.abilities) ?? [], index));
+    }
+    return info;
+  }
+
+  /**
+   * What the decision is part of (engine/processing.ts), as its player is told it. Public by then — a card played is revealed
+   * (CR 10.6.2.1), and so is the card of an ability played from a non-public zone (10.6.2.1.1) — still only a card its player
+   * controls, may see or has seen.
+   */
+  private processingInfo(decision: Decision, view: PlayerView, visible: ReadonlyMap<CardId, CardInfo>): ProcessingInfo | null {
+    const game = this.game!;
+    let found: ReturnType<ProcessingTracker["current"]>;
+    try {
+      found = this.processing.current(game, decision);
+    } catch {
+      return null;
+    }
+    if (!found) return null;
+    // What its card is now, if a cost moved it (the latest first), as its player sees or saw it; their own card anyway.
+    const ids = found.kind === "ability" ? [...found.sources].reverse() : [found.source];
+    const shown = ids.find((id) => visible.has(id) || this.known.has(id));
+    const now = ids.find((id) => game.state.cards[id] !== undefined) ?? found.source;
+    const own = found.controller === decision.player ? game.state.cards[now] : undefined;
+    const card = shown !== undefined ? (visible.get(shown) ?? this.known.get(shown)!) : own ? { def: own.def, printing: own.printing } : null;
+    if (!card) return null;
+    const source = shown ?? now;
+    if (found.kind === "card") return { kind: "card", controller: found.controller, source, card, ...(found.playOption ? { playOption: found.playOption } : {}) };
+    return { kind: "ability", controller: found.controller, source, card, ability: this.abilityInfo(found.source, found.sourceDef, found.ability, view) };
   }
 
   private record(events: readonly GameEvent[]): void {
@@ -1061,7 +1348,13 @@ export class GameHost {
       if (viewer !== "all" && raw.type === "cardsLookedAt" && raw.player !== viewer) continue;
       const event = viewer === "all" ? raw : viewer === "public" ? redactEvent(redactEvent(raw, 0), 1) : redactEvent(raw, viewer);
       this.learn(event);
-      this.log.push({ seq: ++this.logSeq, turn: game.state.turn, event, cards: this.cardsIn(event) });
+      const entry: LogEntry = { seq: ++this.logSeq, turn: game.state.turn, event, cards: this.cardsIn(event) };
+      // An ability played (public, CR 10.6.2.7): its kind, for the page (the sound of activated abilities).
+      if (event.type === "abilityPlayed") {
+        const { kind, evolve } = summarizeAbility(abilityOf(this.engine, event.sourceDef, event.ability), event.sourceDef, this.engine);
+        entry.ability = { kind, ...(evolve ? { evolve } : {}) };
+      }
+      this.log.push(entry);
     }
   }
 
@@ -1120,7 +1413,20 @@ export class GameHost {
     const game = this.game;
     const options = this.options;
     if (!game || !options) return;
+    this.tick();
     const perspective = this.perspective();
+    const view = this.view(perspective);
+    // Cards put into a hand in public that are still there; one the person can't see there holds the next answers a moment,
+    // from when it lands: the table's plan of this update (the same log and announcement it gets) says when its flight starts.
+    const toHand = this.toHand.filter((c) => view.players[c.player].hand.some((h) => h.id === c.id));
+    this.toHand = [];
+    const hidden = new Set(toHand.filter((c) => view.players[c.player].hand.some((h) => h.id === c.id && h.hidden)).map((c) => c.id));
+    if (hidden.size > 0 && this.settings.revealPauseMs > 0) {
+      const plan = planTimeline(this.log, this.announcement?.source ?? null);
+      const waits = planFlights(this.log).flatMap((f) => (f.card !== null && hidden.has(f.card) ? [flightDelay(f, plan)] : []));
+      this.revealFor = this.settings.revealPauseMs + Math.max(0, ...waits);
+      this.revealUntil = this.now() + this.revealFor;
+    }
     const update: GameUpdate = {
       seed: options.seed,
       controllers: options.controllers,
@@ -1130,10 +1436,12 @@ export class GameHost {
       manual: this.manualInfo(),
       announcement: this.announcement,
       looked: this.looked,
+      ...(toHand.length > 0 ? { toHand } : {}),
       watch: this.watchState(),
       online: this.onlineState(),
       perspective,
-      view: this.view(perspective),
+      view,
+      playCosts: this.playCosts(perspective, view),
       decision: this.decisionInfo(),
       waitingFor: this.passing || this.watching ? null : (game.decision?.player ?? null),
       thinking,
@@ -1149,6 +1457,12 @@ export class GameHost {
     this.send({ kind: "update", update });
   }
 
+  /** The play costs the card panel shows (playCostsOf); a spectator decides nothing. */
+  private playCosts(viewer: PlayerId, view: PlayerView): Record<CardId, number> {
+    const game = this.game!;
+    return this.spectating || game.isOver ? {} : playCostsOf(this.engine, game, viewer, view);
+  }
+
   /** What can be done by hand now, when manual debugging is on (the core's options, the abilities' summaries, the decks). */
   private manualInfo(): ManualInfo | null {
     const game = this.game;
@@ -1158,7 +1472,7 @@ export class GameHost {
     for (const key of options.activatable) {
       const [card, index] = key.split(":") as [CardId, string];
       const ref = game.reader().info(card).abilities[Number(index)];
-      if (ref) abilities[key] = summarizeAbility(ref.ability, ref.def);
+      if (ref) abilities[key] = summarizeAbility(ref.ability, ref.def, this.engine);
     }
     const deck = (p: PlayerId): Record<DefId, number> => {
       const counts: Record<DefId, number> = {};

@@ -1,14 +1,14 @@
 // The sounds: background music for each screen, and sound effects for what happens in a game and for
 // the interface's buttons. Silent unless the player put the files in public/audio. Which effects an update makes, and
 // when, is planned in sound-plan.ts (a card's own sound before the common one); this plays them.
-import type { CardId, PlayerView } from "@sve/core";
+import type { CardId, PlayerId, PlayerView } from "@sve/core";
 import type { Catalog } from "../app/catalog";
 import { getSettings, subscribeSettings } from "../app/settings";
 import type { GameUpdate } from "../engine/protocol";
 import { findCard } from "../engine/view-utils";
 import { displayOf } from "../game/card/display";
 import { bgmUrl, cardSoundUrl, sfxUrl } from "./lookup";
-import { planSounds, SFX, type BgmName, type SfxName, type SoundCue } from "./sound-plan";
+import { planSounds, SFX, type BgmName, type CardSoundKind, type SfxName, type SoundCue } from "./sound-plan";
 
 /** At most this many sounds start at the same moment (a big batch isn't noisy). */
 const AT_ONCE = 4;
@@ -43,21 +43,40 @@ function shownIds(views: (PlayerView | null)[], catalog: Catalog | null, id: Car
   return [];
 }
 
+/** The numbers of a player's leader in a view: its printing, then its definition (the one the game is played with). */
+function leaderIds(view: PlayerView, player: PlayerId): string[] {
+  const leader = view.players[player].leader;
+  return leader ? [...new Set([leader.printing, leader.def].filter((x): x is string => !!x))] : [];
+}
+
+/** A leader's voice (public/audio/cards/<leader>-<kind>), if the person has it: a quick chat line of its player. */
+export function playLeaderVoice(update: GameUpdate, player: PlayerId, kind: CardSoundKind): void {
+  const url = cardSoundUrl(leaderIds(update.view, player), kind);
+  if (url) playUrl(url);
+}
+
 /**
  * Play the sounds of an update (`previous`: the view before it, where cards that have left were). Each card's own sound
  * plays; the common sound of a kind plays once for the cards without their own.
  */
 export function playUpdateSounds(update: GameUpdate, previous: PlayerView | null, catalog: Catalog | null, lastAnnouncement: number | null): void {
   if (update.logReset) return;
+  // The cards put into a hand in public that the table shows (game/animation/reveal.ts), face down there or not.
+  const revealed = (update.toHand ?? []).flatMap((c) => {
+    const card = update.view.players[c.player].hand.find((h) => h.id === c.id);
+    return card ? [{ id: c.id, hidden: card.hidden }] : [];
+  });
   const cues = planSounds(
     update.log,
     {
       perspective: update.perspective,
       typeOf: (def) => catalog?.def(def)?.type,
       shownIds: (id) => shownIds([update.view, previous], catalog, id),
+      leaderIds: (player) => leaderIds(update.view, player),
       timed: getSettings().animations,
     },
     update.announcement?.source ?? null,
+    revealed,
   );
   if (update.announcement && update.announcement.seq !== lastAnnouncement) cues.push({ sfx: "quick", at: 0 });
   // One sound per file and moment: the card's own, else the common one.
@@ -184,10 +203,10 @@ subscribeSettings((settings) => {
   music.audio.volume = Math.min(1, Math.max(0, bgmVolume));
 });
 
-/** The interface's click sound: buttons, menu items, checkboxes and choices (installed once by the app). */
+/** The interface's click sound: buttons, menu items, checkboxes and choices, links in card text (installed once by the app). */
 export function installClickSound(): () => void {
   const onClick = (e: MouseEvent) => {
-    const target = e.target instanceof Element ? e.target.closest("button, [role=menuitem], summary, select, input[type=checkbox], input[type=radio]") : null;
+    const target = e.target instanceof Element ? e.target.closest("button, [role=menuitem], summary, select, input[type=checkbox], input[type=radio], .sve-card-link") : null;
     if (target && !(target as HTMLButtonElement).disabled) playSfx("click");
   };
   document.addEventListener("click", onClick, true);

@@ -2,7 +2,9 @@
 // Components read it with useApp(select); cosmetic notifications have their own local lifetime.
 import { useSyncExternalStore } from "react";
 import { EngineClient } from "../engine/client";
-import type { LogEntry } from "../engine/protocol";
+import type { CatalogCard, LogEntry } from "../engine/protocol";
+import { translate } from "../i18n";
+import { cardTextProblems, onCardTexts, withShownTexts } from "../resources/card-texts";
 import type { GameUpdate, HandGainAnnouncement } from "../presentation/protocol";
 import { playUpdateSounds } from "../resources/sound";
 import { Catalog } from "./catalog";
@@ -21,6 +23,8 @@ export interface AppState {
   /** The engine failed to start. */
   startError: string | null;
   catalog: Catalog | null;
+  /** Stable rules/names from the worker. Display-text reloads must not restart deck validation. */
+  rulesCatalog: Catalog | null;
   update: GameUpdate | null;
   log: LogEntry[];
   errors: AppError[];
@@ -31,7 +35,7 @@ export interface AppState {
   handGainExpiresAt: number | null;
 }
 
-let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null, handGainExpiresAt: null };
+let state: AppState = { ready: false, startError: null, catalog: null, rulesCatalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null, handGainExpiresAt: null };
 const listeners = new Set<() => void>();
 
 /** The state now, outside React (online play reads how far the game is). */
@@ -54,6 +58,7 @@ export function dismissHandGain(key: string): void {
 }
 
 let nextError = 1;
+let dataCatalog: CatalogCard[] | null = null;
 
 const beforeUpdate = new Set<(update: GameUpdate) => void>();
 
@@ -84,7 +89,7 @@ export const dicePlayback = new DicePlayback({
   publish: publishUpdate,
   idle: () => setState({ diceBusy: false }),
   animate: (update, entries, done) => {
-    publishUpdate({ ...update, log: [], animationLog: entries, effectContext: null, decision: null, manual: null, announcement: null, looked: null }, false, false);
+    publishUpdate({ ...update, log: [], animationLog: entries, toHand: undefined, effectContext: null, decision: null, manual: null, announcement: null, looked: null }, false, false);
     void tableAnimations.wait().then(done);
   },
   waitForAnimations: (done) => { void tableAnimations.wait().then(done); },
@@ -103,10 +108,12 @@ export function setDiceScreenActive(active: boolean): void {
 engine.subscribe((message) => {
   switch (message.kind) {
     case "ready":
-      setState({ ready: true, catalog: new Catalog(message.catalog) });
+      dataCatalog = message.catalog;
+      setState({ ready: true, catalog: new Catalog(withShownTexts(message.catalog)), rulesCatalog: new Catalog(message.catalog) });
       break;
     case "update": {
       const update = message.update;
+      update.receivedAt = Date.now();
       setState({ authoritative: update });
       if (diceScreenActive) dicePlayback.enqueue(update);
       else { dicePlayback.reset(); publishUpdate(update, true); }
@@ -121,6 +128,14 @@ engine.subscribe((message) => {
     default:
       break;
   }
+});
+
+let toldTextProblems = new Set<string>();
+onCardTexts(() => {
+  if (dataCatalog) setState({ catalog: new Catalog(withShownTexts(dataCatalog)) });
+  const problems = new Set(cardTextProblems());
+  for (const file of problems) if (!toldTextProblems.has(file)) reportError(translate(getSettings().uiLang, "resources.ownTextBad", { file }));
+  toldTextProblems = problems;
 });
 
 export function reportError(message: string): void {

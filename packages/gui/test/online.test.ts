@@ -82,6 +82,12 @@ describe("messages", () => {
       engine: "def",
     });
     expect(parseMessage({ t: "chat", text: "x".repeat(900) })).toEqual({ t: "chat", text: "x".repeat(500) });
+    // A quick chat line names which (its text is the sender's words); a name it doesn't know is no quick chat line.
+    expect(parseMessage({ t: "chat", text: "你好。", quick: "greet", seat: 0 })).toEqual({ t: "chat", text: "你好。", quick: "greet", seat: 0 });
+    expect(parseMessage({ t: "chat", text: "?", quick: "wave" })).toEqual({ t: "chat", text: "?" });
+    // A person who blocks the quick chat says so (only `true` counts).
+    expect(parseMessage({ t: "hello", version: "online-6", cards: "abc", engine: "def", noQuickChat: true })).toEqual({ t: "hello", version: "online-6", cards: "abc", engine: "def", noQuickChat: true });
+    expect(parseMessage({ t: "hello", version: "online-6", cards: "abc", engine: "def", noQuickChat: "yes" })).toEqual({ t: "hello", version: "online-6", cards: "abc", engine: "def" });
     expect(parseMessage({ t: "ping", n: 3 })).toEqual({ t: "ping", n: 3 });
     expect(parseMessage({ t: "select", extra: 1 })).toEqual({ t: "select" });
     for (const bad of [null, "hi", 3, { t: "chat" }, { t: "ping", n: "3" }, { t: "hello", version: 1 }, { t: "hello", version: "online-2", cards: "abc" }, { t: "unknown" }]) {
@@ -90,18 +96,21 @@ describe("messages", () => {
   });
 
   it("carry a game's preparation and answers, checked field by field", () => {
-    const rules = { format: "crossCraft", list: "01_26_EN_CROSS", listHash: "1a2b3c4d5e", turnOrder: "random", undo: false, watchHands: false, watchChat: false };
+    const rules = { format: "crossCraft", list: "01_26_EN_CROSS", listHash: "1a2b3c4d5e", turnOrder: "random", undo: false, watchHands: false, watchChat: false, turnLimit: null };
     expect(parseMessage({ t: "rules", rules })).toEqual({ t: "rules", rules });
     // The list's fingerprint: none when it isn't a text.
     expect(parseMessage({ t: "rules", rules: { ...rules, listHash: 7 } })).toEqual({ t: "rules", rules: { ...rules, listHash: null } });
     // What the spectators may do (the server's rooms): only when the host says so; an older host's rules say nothing of it.
     expect(parseMessage({ t: "rules", rules: { ...rules, watchHands: true, watchChat: "yes" } })).toEqual({ t: "rules", rules: { ...rules, watchHands: true } });
-    const { watchHands: _h, watchChat: _c, ...older } = rules;
+    const { watchHands: _h, watchChat: _c, turnLimit: _l, ...older } = rules;
     expect(parseMessage({ t: "rules", rules: older })).toEqual({ t: "rules", rules });
     expect(parseMessage({ t: "rules", rules: { ...rules, list: null } })).toEqual({ t: "rules", rules: { ...rules, list: null } });
     // Taking answers back: allowed only when the host says so.
     expect(parseMessage({ t: "rules", rules: { ...rules, undo: true } })).toEqual({ t: "rules", rules: { ...rules, undo: true } });
     expect(parseMessage({ t: "rules", rules: { ...rules, undo: "yes" } })).toEqual({ t: "rules", rules });
+    // A turn time limit: whole seconds from 10 to 3600, else none.
+    expect(parseMessage({ t: "rules", rules: { ...rules, turnLimit: 600 } })).toEqual({ t: "rules", rules: { ...rules, turnLimit: 600 } });
+    for (const turnLimit of [9, 3601, 60.5, "600", true]) expect(parseMessage({ t: "rules", rules: { ...rules, turnLimit } })).toEqual({ t: "rules", rules });
     for (const t of ["undo", "undoOk", "undoNo", "takeBack"] as const) {
       expect(parseMessage({ t, from: 12 })).toEqual({ t, from: 12 });
       expect(parseMessage({ t, from: -1 })).toBeNull();
@@ -166,8 +175,20 @@ describe("messages", () => {
     for (const bad of [{ ...game, decks: [deck] }, { ...game, deckNames: ["A", 1] }, { ...game, format: "modern" }, { ...game, backlog: -1 }, { ...game, secondLeaders: [7, null] }]) {
       expect(parseMessage({ t: "watch", game: bad })).toBeNull();
     }
-    // The options a spectator's engine plays it with: both seats the players' programs, the players' pacing.
-    expect(watchedOptions(game as unknown as WatchedGame)).toMatchObject({ seed: "seed", controllers: ["remote", "remote"], showEveryMainPhase: true, askEveryQuickWindow: true, manualActions: false });
+    // The options a spectator's engine plays it with: both seats the players' programs, the players' pacing (each player's
+    // program answers their quick windows), and their turn time limit when the room has one.
+    expect(watchedOptions(game as unknown as WatchedGame)).toMatchObject({
+      seed: "seed",
+      controllers: ["remote", "remote"],
+      showEveryMainPhase: true,
+      askEveryQuickWindow: true,
+      ownQuickWindows: true,
+      manualActions: false,
+    });
+    expect(watchedOptions(game as unknown as WatchedGame).turnLimit).toBeUndefined();
+    expect(parseMessage({ t: "watch", game: { ...game, turnLimit: 90 } })).toEqual({ t: "watch", game: { ...game, turnLimit: 90 } });
+    expect(parseMessage({ t: "watch", game: { ...game, turnLimit: 5 } })).toEqual({ t: "watch", game });
+    expect(watchedOptions({ ...game, turnLimit: 90 } as unknown as WatchedGame).turnLimit).toBe(90);
     const input = { type: "mainPhase", action: { type: "endMainPhase" } };
     expect(parseMessage({ t: "backlog", start: 0, inputs: [{ input, by: 0 }, { input: { type: "quick", action: { type: "pass" } }, by: null }] })).toEqual({
       t: "backlog",

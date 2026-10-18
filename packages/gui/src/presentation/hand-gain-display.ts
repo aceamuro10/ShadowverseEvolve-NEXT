@@ -31,7 +31,7 @@ export class HandGainDisplay {
     } else {
       // Each publication can contain several gains. The latest eligible result replaces the
       // panel immediately; superseded results never wait in a queue or return after timeout.
-      const gain = update.handGains?.findLast((gain) => gain.operator !== update.perspective);
+      const gain = update.handGains?.findLast((gain) => gain.to !== "evolveDeck" && gain.operator !== update.perspective);
       if (gain && gain.key !== this.current?.key) {
         this.clear(false);
         this.current = gain;

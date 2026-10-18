@@ -2,6 +2,7 @@
 // storage): the defaults are used. The PC release also keeps most of them in its settings.ini (settings-file.ts).
 import { useSyncExternalStore } from "react";
 import { knownController, type FormatId, type SeatController, type TurnOrder } from "../engine/protocol";
+import { TURN_LIMIT } from "../net/messages";
 import type { TurnServer } from "../net/relays";
 
 /** "zh-Hant": Traditional Chinese, the Simplified Chinese converted (i18n/hant.ts). */
@@ -59,6 +60,20 @@ export interface Settings {
   /** Online play on the server, the host's rules: spectators may see both players' hidden cards ("reveal all"), and chat. */
   allowWatchHands: boolean;
   allowWatchChat: boolean;
+  /** Online play, the host's rule: a turn time limit (on or not, and its seconds, kept while off). */
+  turnLimitOn: boolean;
+  turnLimitSeconds: number;
+  /**
+   * Online play, this player's own: a quick window where they have nothing to play is passed after a pause like a person's
+   * (fakeQuick); every quick window of theirs is passed for them (skipQuick).
+   */
+  fakeQuick: boolean;
+  skipQuick: boolean;
+  /**
+   * The quick chat is off (game/quick-chat.ts): this person neither uses it nor is shown or told it; online, nobody in their
+   * games uses it (their program says so in "hello").
+   */
+  blockQuickChat: boolean;
 }
 
 const KEY = "sve-gui-settings";
@@ -90,6 +105,11 @@ export const DEFAULT_SETTINGS: Settings = {
   roomPassword: false,
   allowWatchHands: false,
   allowWatchChat: false,
+  turnLimitOn: false,
+  turnLimitSeconds: TURN_LIMIT.first,
+  fakeQuick: false,
+  skipQuick: false,
+  blockQuickChat: false,
 };
 
 /**

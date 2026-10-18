@@ -2,17 +2,15 @@
 // buttons that finish the pending decision (end the main phase, pass, confirm a selection, keep the hand ...). Everything
 // else about a decision is on the table (lit cards and their menus) or in the decision window (DecisionDialog).
 import type { Answer } from "@sve/core";
-import type { ReactNode } from "react";
-import type { AbilityUpdate as GameUpdate } from "../../presentation/protocol";
-import { AbilityPrompt } from "../decisions/AbilityPrompt";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { GameUpdate } from "../../presentation/protocol";
 import { useT, type MessageKey } from "../../i18n";
-import { useApp } from "../../app/store";
-import { useSettings } from "../../app/settings";
 import { isOnTable } from "../../engine/view-utils";
 import { inDialog } from "../actions";
-import { rangeLabel, SELECT_KEYS, CHOOSE_KEYS, CONFIRM_KEYS } from "../decisions/DecisionDialog";
+import { rangeLabel, SELECT_KEYS } from "../decisions/DecisionDialog";
+import { ProcessingPrompt } from "../decisions/ProcessingPrompt";
 import { sendAnswer, setRedrawing, useInteraction } from "../interaction";
-import { cardLabel, playerLabel } from "../labels";
+import { playerLabel } from "../labels";
 
 const PHASE_KEYS: Record<string, MessageKey> = {
   setup: "game.phase.setup",
@@ -25,8 +23,6 @@ const PHASE_KEYS: Record<string, MessageKey> = {
 /** `placing`: a card waiting for the person to pick its slot (choose card spots by hand), by name. */
 export function CenterLine({ update, placing = null }: { update: GameUpdate; placing?: string | null }) {
   const t = useT();
-  const catalog = useApp((s) => s.catalog)!;
-  const { cardLang } = useSettings();
   const view = update.view;
   const decision = update.decision?.decision;
   const sent = useInteraction((s) => s.sent);
@@ -39,14 +35,16 @@ export function CenterLine({ update, placing = null }: { update: GameUpdate; pla
         {label}
       </button>,
     );
+  // Under the game's turn, the active player's own turn count (CR 3.3 turns passed: what super evolving waits for, 12.2.4).
+  const activeTurn = () => {
+    const player = playerLabel(view.activePlayer, update, t);
+    const n = view.players[view.activePlayer].turnsPassed;
+    return n > 0 ? t("game.activePlayerTurn", { player, n }) : t("game.activePlayer", { player });
+  };
   let prompt: string | null = null;
-  if (decision && inDialog(decision, (id) => isOnTable(view, id))) {
-    const card = "subject" in decision && decision.subject ? cardLabel(decision.subject.id, update, catalog, cardLang, t) : "";
-    const instruction = decision.type === "choose" ? t(CHOOSE_KEYS[decision.reason], { card }) :
-      decision.type === "confirm" ? t(CONFIRM_KEYS[decision.reason], { card }) :
-      decision.type === "orderCards" ? t(decision.reason === "deckTop" ? "decision.orderCards.deckTop" : "decision.orderCards.deckBottom") :
-      decision.type === "selectCards" ? `${t(SELECT_KEYS[decision.reason])} — ${t("decision.selectCards", { range: rangeLabel(decision.min, decision.max, t) })}` : null;
-    prompt = [instruction, t("table.answerInDialog")].filter(Boolean).join(" ");
+  const dialog = decision !== undefined && inDialog(decision, (id) => isOnTable(view, id));
+  if (decision && dialog) {
+    prompt = t("table.answerInDialog");
   } else if (decision) {
     switch (decision.type) {
       case "mainPhase":
@@ -88,12 +86,13 @@ export function CenterLine({ update, placing = null }: { update: GameUpdate; pla
   }
   return (
     <>
-      <div className="sve-center-status">
+      {/* With a turn clock, a line more: on a small screen the prompt gets one less (the box keeps its height). */}
+      <div className={`sve-center-status${update.online?.clock ? " sve-center-status-timed" : ""}`}>
         <div className="sve-center-turn">
-          <strong>{t("game.turn", { n: view.players[view.activePlayer].turnsPassed })}</strong> · {t(PHASE_KEYS[view.phase] ?? "game.phase.main")}
+          <strong>{t("game.turn", { n: view.turn })}</strong> · {t(PHASE_KEYS[view.phase] ?? "game.phase.main")}
         </div>
-        {view.phase !== "over" ? <div>{t("game.activePlayer", { player: playerLabel(view.activePlayer, update, t) })}</div> : null}
-        <AbilityPrompt update={update} compact />
+        {view.phase !== "over" ? <div data-testid="center-active-player">{activeTurn()}</div> : null}
+        <TurnClockLine update={update} />
         {placing ? (
           <div className="sve-center-prompt sve-your-move" data-testid="table-choose-slot">
             {t("table.chooseSlot", { card: placing })}
@@ -101,8 +100,35 @@ export function CenterLine({ update, placing = null }: { update: GameUpdate; pla
         ) : prompt ? (
           <div className={`sve-center-prompt${decision ? " sve-your-move" : ""}`}>{prompt}</div>
         ) : null}
+        {/* A decision answered on the table: what it is part of (the decision window shows it above its question). */}
+        {decision && !dialog ? <ProcessingPrompt update={update} compact /> : null}
       </div>
       <div className="sve-center-actions">{buttons}</div>
     </>
+  );
+}
+
+/**
+ * Online play with a turn time limit: whose time is running and how much of it is left, counting down here between the
+ * worker's updates (each says the time left when it was made). The last 30 seconds stand out.
+ */
+function TurnClockLine({ update }: { update: GameUpdate }) {
+  const t = useT();
+  const clock = update.online?.clock ?? null;
+  const at = useMemo(() => update.receivedAt ?? Date.now(), [clock]);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (clock?.running == null) return;
+    const timer = window.setInterval(() => setTick((n) => n + 1), 250);
+    return () => window.clearInterval(timer);
+  }, [clock]);
+  if (!clock || clock.running === null || update.result) return null;
+  const player = clock.running;
+  const seconds = Math.ceil(Math.max(0, clock.left[player] - (Date.now() - at)) / 1000);
+  const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  return (
+    <div className={`sve-center-clock${seconds <= 30 ? " sve-center-clock-low" : ""}`} data-testid="center-clock" data-player={player} data-seconds={seconds}>
+      {t("game.clock", { player: playerLabel(player, update, t), time })}
+    </div>
   );
 }

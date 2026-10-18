@@ -4,7 +4,10 @@
  * A bot is a level (easy | medium | hard | medium-beta), one of sve-server's AIs imitated (sve-fool, sve-good,
  * sve-planner; tools/sve-server-ais), or easy / medium / hard with its evaluation swapped, to check the evaluation interface:
  * "medium:identity" plays with the hand-written evaluation passed in from outside (exactly as medium does), and
- * "medium:negated" scores its own positions the other way round (it plays to lose).
+ * "medium:negated" scores its own positions the other way round (it plays to lose). "medium2" is Medium searching two turns
+ * ahead (lookahead 2, samples 2: the bot that generates the training data, without exploring); "medium2:leaf=<weights.json>"
+ * is it with the positions where its searches stop (the leaves, its replyEvaluator) scored by the weights of a file
+ * (npm run rl:w1), everything else as medium2 — the learned evaluations' gate (G1).
  *
  * Decks: the sample decks (packages/gui/decks/samples, all but the Cross Craft one), or a deck set of tools/rl/decksets.json:
  * "train", "holdout" or "legal" (both), played in its format (the engine's deck rules on, and every deck checked against
@@ -17,6 +20,7 @@
  *   --workers N        play on N processes at once (default 1)
  *   --seed text        the series of games (default "arena"); keep data ("gen-...") and comparisons ("eval-...") apart
  *   --range a-b        only games a to b-1 of the series (another run, into another --out, can play the rest)
+ *   --skip dir,dir     leave out the games of the series already in these --out folders (to go on with a stopped run)
  *   --out dir          a new folder: games.jsonl.gz (every game, written as it ends, replayable: npm run rl:verify),
  *                      report.json (the results; the same games give the same file) and timing.json
  *   --replays N        with --out: the first N games also as replays the GUI opens (replays/)
@@ -28,13 +32,17 @@
 import { execSync, fork } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
+import { constants, gunzipSync, gzipSync } from "node:zlib";
 import { createEngine, type Answer, type Decision, type DeckList, type PlayerId } from "../packages/core/src";
 import { ALL_CARDS, ALL_SCRIPTS } from "../packages/core/src/sets";
-import { BOT_LEVELS, createBot, evaluate, type Bot, type BotEvaluation, type BotLevel, type BotStats } from "../packages/bot/src";
+import { withDataTexts } from "./lib/card-texts";
+import { BOT_LEVELS, MEDIUM_OPTIONS, PlannerBot, createBot, evaluate, weightsEvaluator, type Bot, type BotEvaluation, type BotLevel, type BotStats, type EvalWeights } from "../packages/bot/src";
 import { engineFingerprint } from "../packages/gui/fingerprint";
 import { DECK_SETS, ROOT, allSampleDecks, deckSet, orderedMatchups, sampleDeck, seriesGame, type NamedDeck } from "./rl/series";
 import { SVE_SERVER_AIS, createSveServerBot, type SveServerAI } from "./sve-server-ais";
+
+/** The cards with this machine's texts (lib/card-texts.ts), which sve-server's imitated AIs read; the rules never do. */
+const CARDS = withDataTexts(ALL_CARDS);
 
 type Engine = ReturnType<typeof createEngine>;
 
@@ -44,7 +52,7 @@ function option(name: string): string | null {
   const at = args.indexOf(name);
   return at >= 0 ? (args[at + 1] ?? null) : null;
 }
-const VALUED = ["--decks", "--workers", "--seed", "--shard", "--range", "--out", "--replays"];
+const VALUED = ["--decks", "--workers", "--seed", "--range", "--out", "--replays", "--skip"];
 const positional = args.filter((arg, i) => !arg.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1]!)));
 /** A whole number of at least `least`, or NaN. */
 const whole = (text: string | null | undefined, fallback: number, least: number) => {
@@ -56,15 +64,29 @@ const specs = [positional[1] ?? "medium", positional[2] ?? "easy"] as const;
 
 // ---- Bots ----
 
-const SPEC = /^([a-z-]+)(?::(identity|negated))?$/;
+const SPEC = /^([a-z0-9-]+)(?::(identity|negated|leaf=.+))?$/;
 const VARIANT_LEVELS: readonly string[] = ["easy", "medium", "hard"];
+/** Medium searching two turns ahead, as the stage 1 data's bot (tools/rl/jobs/stage1.json) without its exploring. */
+const MEDIUM2 = { ...MEDIUM_OPTIONS, lookahead: 2 as const, samples: 2 };
 function specProblem(spec: string): string | null {
   const m = SPEC.exec(spec);
   if (!m) return `not a bot: ${spec}`;
   const [, level, variant] = m;
-  if (![...BOT_LEVELS, ...SVE_SERVER_AIS].includes(level as never)) return `no such level: ${level}`;
+  if (![...BOT_LEVELS, ...SVE_SERVER_AIS, "medium2"].includes(level as never)) return `no such level: ${level}`;
+  if (variant?.startsWith("leaf=")) {
+    if (level !== "medium2") return "leaf=<weights.json> works with medium2 only";
+    const file = variant.slice(5);
+    if (!existsSync(file)) return `no weights file ${file}`;
+    return null;
+  }
   if (variant && !VARIANT_LEVELS.includes(level!)) return `${variant} works with ${VARIANT_LEVELS.join(", ")} (the default weights) only`;
   return null;
+}
+/** The weights of a file written by npm run rl:w1 (format sve-eval-weights). */
+function leafWeights(file: string): EvalWeights {
+  const data = JSON.parse(readFileSync(file, "utf8")) as { format?: string; weights?: EvalWeights };
+  if (data.format !== "sve-eval-weights" || !data.weights) throw new Error(`${file} isn't an sve-eval-weights file`);
+  return data.weights;
 }
 /** The evaluations of a variant: the hand-written one passed in (the same play), or turned round (the bot plays to lose). */
 function variantEvaluation(variant: string | undefined): BotEvaluation {
@@ -78,6 +100,10 @@ function variantEvaluation(variant: string | undefined): BotEvaluation {
 function makeBot(engine: Engine, spec: string, seed: string): Bot {
   const [, level, variant] = SPEC.exec(spec)!;
   if ((SVE_SERVER_AIS as readonly string[]).includes(level!)) return createSveServerBot(engine, level as SveServerAI);
+  if (level === "medium2") {
+    const leaf = variant?.startsWith("leaf=") ? { replyEvaluator: weightsEvaluator(leafWeights(variant.slice(5))) } : {};
+    return new PlannerBot(engine, { ...MEDIUM2, ...leaf, seed });
+  }
   return createBot(engine, level as BotLevel, seed, 1, variantEvaluation(variant));
 }
 /** The GUI's controller for a replay's seat (only shown while watching). */
@@ -98,6 +124,22 @@ const mirror = flag("--mirror");
 const independent = flag("--independent");
 const matchups = orderedMatchups(decks.length, mirror);
 const series = option("--seed") ?? "arena";
+/** --skip: the games of this series already played into these folders (by index), left out of this run. */
+const skipped = new Set<number>();
+for (const dir of (option("--skip") ?? "").split(",").map((d) => d.trim()).filter(Boolean)) {
+  const file = join(dir, "games.jsonl.gz");
+  if (!existsSync(file)) throw new Error(`--skip: no games in ${dir}`);
+  // A run that was stopped: its last game may be half written.
+  const text = gunzipSync(readFileSync(file), { finishFlush: constants.Z_SYNC_FLUSH }).toString("utf8");
+  for (const line of text.split("\n")) {
+    try {
+      const g = JSON.parse(line) as { series?: string; index?: number };
+      if (g.series === series && typeof g.index === "number") skipped.add(g.index);
+    } catch {
+      // the half-written last line
+    }
+  }
+}
 const [rangeStart, rangeEnd] = (option("--range") ?? `0-${games}`).split("-").map((n) => whole(n, NaN, 0)) as [number, number];
 const gameOf = (index: number) => {
   const g = seriesGame(index, series, matchups, independent);
@@ -212,19 +254,18 @@ function playGame(engine: Engine, index: number): GameRecord {
   };
 }
 
-// ---- A worker: its share of the games, one message each; it exits once every message is out ----
+// ---- A worker: plays the game it is sent, answers with its record, and asks for the next ----
+// (handed out one at a time, so the games end about in the series' order however fast each process is: a sequential test
+// counting the complete pairs in order isn't held back by one slow process)
 
-const shard = option("--shard");
-if (shard) {
-  const [k, n] = shard.split("/").map(Number) as [number, number];
-  const engine = createEngine({ cards: ALL_CARDS, scripts: ALL_SCRIPTS });
-  const sent: Promise<void>[] = [];
-  for (let i = rangeStart + k; i < rangeEnd; i += n) {
-    const record = playGame(engine, i);
-    sent.push(new Promise((done) => process.send!(record, undefined, {}, () => done())));
-  }
-  await Promise.all(sent);
-  process.exit(0);
+if (flag("--worker")) {
+  const engine = createEngine({ cards: CARDS, scripts: ALL_SCRIPTS });
+  process.on("message", (m: { index?: number; done?: true }) => {
+    if (m.done) process.exit(0);
+    process.send!(playGame(engine, m.index!));
+  });
+  process.send!({ ready: true });
+  await new Promise(() => {});
 }
 
 // ---- The main process: check, play, report ----
@@ -233,7 +274,7 @@ const LEVELS = [...BOT_LEVELS, ...SVE_SERVER_AIS].join("|");
 const fail = (message: string) => {
   console.error(message);
   console.error(
-    `usage: npm run bot:arena -- [games] [${LEVELS}][:identity|:negated] [same] [--decks sd01,sd02|train|holdout|legal] [--mirror] [--independent] [--workers N] [--seed text] [--range a-b] [--out dir] [--replays N]`,
+    `usage: npm run bot:arena -- [games] [${LEVELS}|medium2][:identity|:negated|:leaf=weights.json] [same] [--decks sd01,sd02|train|holdout|legal] [--mirror] [--independent] [--workers N] [--seed text] [--range a-b] [--out dir] [--replays N]`,
   );
   process.exit(1);
 };
@@ -248,7 +289,7 @@ if (!(rangeStart < rangeEnd && rangeEnd <= games)) fail(`--range a-b: 0 <= a < b
 if (decks.length !== deckNames.length) fail(`no sample deck named ${deckNames.filter((n) => !decks.some((d) => d.name === n)).join(", ")}`);
 if (matchups.length === 0) fail("two different decks are needed (or --mirror)");
 if (replays > 0 && !out) fail("--replays needs --out");
-const engine = createEngine({ cards: ALL_CARDS, scripts: ALL_SCRIPTS });
+const engine = createEngine({ cards: CARDS, scripts: ALL_SCRIPTS });
 if (standard) {
   const bad = decks.map((d) => ({ name: d.name, problems: deckProblems(engine, d.deck) })).filter((d) => d.problems.length > 0);
   if (bad.length > 0) fail(bad.map((d) => `${d.name}: ${d.problems.join("; ")}`).join("\n"));
@@ -334,13 +375,20 @@ const take = (r: GameRecord) => {
   process.stdout.write(r.error ? "!" : r.winner === "a" ? "A" : r.winner === "b" ? "B" : r.winner === "draw" ? "=" : "?");
 };
 const exitCodes: (number | null)[] = [];
+const toPlay: number[] = [];
+for (let i = rangeStart; i < rangeEnd; i++) if (!skipped.has(i)) toPlay.push(i);
 if (workers === 1) {
-  for (let i = rangeStart; i < rangeEnd; i++) take(playGame(engine, i));
+  for (const i of toPlay) take(playGame(engine, i));
 } else {
+  let next = 0;
   await Promise.all(
-    Array.from({ length: workers }, (_, k) => {
-      const child = fork(process.argv[1]!, [...args, "--shard", `${k}/${workers}`], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
-      child.on("message", (r: GameRecord) => take(r));
+    Array.from({ length: Math.min(workers, Math.max(1, toPlay.length)) }, () => {
+      const child = fork(process.argv[1]!, [...args, "--worker"], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
+      child.on("message", (m: GameRecord | { ready: true }) => {
+        if (!("ready" in m)) take(m);
+        if (next < toPlay.length) child.send({ index: toPlay[next++] });
+        else child.send({ done: true });
+      });
       return new Promise<void>((done) =>
         child.on("close", (code) => {
           exitCodes.push(code);
@@ -354,7 +402,7 @@ records.sort((u, v) => u.index - v.index);
 const seconds = (performance.now() - started) / 1000;
 const played = new Set(records.map((r) => r.index));
 const missing: number[] = [];
-for (let i = rangeStart; i < rangeEnd; i++) if (!played.has(i)) missing.push(i);
+for (let i = rangeStart; i < rangeEnd; i++) if (!played.has(i) && !skipped.has(i)) missing.push(i);
 
 // ---- The report ----
 

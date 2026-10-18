@@ -7,6 +7,7 @@ import type { SeatController, TurnOrder } from "../engine/protocol";
 import { checkDeck, useFormat } from "../formats/check";
 import { formatProblemText, leadersFor, type FormatProblem } from "../formats/formats";
 import { FormatPicker } from "../formats/FormatPicker";
+import { REVEAL_PAUSE_MS } from "../game/animation/plan";
 import { readReplayFile } from "../game/replay-files";
 import { hostApi, type DeckFileEntry } from "../host/api";
 import { useT } from "../i18n";
@@ -44,7 +45,7 @@ export function SetupScreen({ onStarted, onBack, onEditDecks }: Props) {
   const t = useT();
   const settings = useSettings();
   const hasGame = useApp((s) => s.update !== null && s.update.result === null);
-  const catalog = useApp((s) => s.catalog);
+  const catalog = useApp((s) => s.rulesCatalog);
   const [decks, setDecks] = useState<DeckFileEntry[] | null>(null);
   const [seed, setSeed] = useState(newSeed);
   const [status, setStatus] = useState<[DeckStatus | null, DeckStatus | null]>([null, null]);
@@ -102,6 +103,8 @@ export function SetupScreen({ onStarted, onBack, onEditDecks }: Props) {
         announceQuick: settings.announceQuick,
         // An attack's arrow stands before its combat, as long as the bots' pause (at most half a second).
         attackPauseMs: Math.min(settings.botDelayMs, 500),
+        // A card the opponent searched is shown face up before they go on (none with the bots at full speed).
+        revealPauseMs: settings.botDelayMs > 0 ? REVEAL_PAUSE_MS : 0,
       },
     });
     engine.send({
@@ -137,6 +140,7 @@ export function SetupScreen({ onStarted, onBack, onEditDecks }: Props) {
           manualDebug: settings.manualDebug,
           announceQuick: settings.announceQuick,
           attackPauseMs: Math.min(settings.botDelayMs, 500),
+          revealPauseMs: settings.botDelayMs > 0 ? REVEAL_PAUSE_MS : 0,
         },
       });
       engine.send({ kind: "loadReplay", replay });

@@ -2,7 +2,7 @@
 import type { CardView, Engine, GameSession, PendingAbility } from "@sve/core";
 import { findCard } from "../engine/view-utils";
 import type { AbilityDisplayContext } from "./protocol";
-import { abilityTextGroup } from "../game/card/ability-text";
+import { textGroupOf as abilityTextGroup } from "../engine/game-host";
 
 /** Reviewed quote providers for runtime grants, including sources no longer present after Last Words. */
 export const GRANT_TEXT: Readonly<Record<string, { def: string; timing: string }>> = {

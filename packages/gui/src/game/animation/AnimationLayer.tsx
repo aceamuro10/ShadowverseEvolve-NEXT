@@ -21,7 +21,8 @@ import { tableAnimations } from "../../presentation/animation-barrier";
 import { Arrow, type Point } from "../board/Arrow";
 import { CardTile } from "../card/CardTile";
 import { flip, floatText, flyIn, flyOut, lunge, popIn, shake } from "./effects";
-import { planFlights, planTimeline, TIMING } from "./plan";
+import { flightDelay, planFlights, planTimeline, TIMING } from "./plan";
+import { clearShown, showToHand } from "./reveal";
 import { captureTable, takeSnapshot, type Snapshot } from "./snapshot";
 
 onBeforeUpdate(captureTable);
@@ -157,6 +158,7 @@ export function AnimationLayer({ update }: { update: GameUpdate }) {
       for (const timer of pending) window.clearTimeout(timer);
       for (const animation of animations) animation.cancel();
       tableAnimations.reset();
+      clearShown();
     };
   }, []);
   useLayoutEffect(() => {
@@ -172,6 +174,7 @@ export function AnimationLayer({ update }: { update: GameUpdate }) {
       setShowcases([]);
       setFlashes([]);
       groupSnapshot.current = null;
+      clearShown();
     }
     lastSeed.current = update.seed;
     if (update.animationGroup && snapshot) {
@@ -182,6 +185,11 @@ export function AnimationLayer({ update }: { update: GameUpdate }) {
       }
       groupSnapshot.current = { group: update.animationGroup, snapshot };
     } else groupSnapshot.current = null;
+    const entries = update.animationLog ?? update.log;
+    const plan = planTimeline(entries, update.announcement?.source ?? null);
+    if (!update.logReset && update.toHand) {
+      showToHand(update, animations, new Map(planFlights(entries).flatMap((f) => f.card ? [[f.card, flightDelay(f, plan) + TIMING.flight] as const] : [])));
+    }
     if (!animations || !snapshot || update.logReset) {
       tableAnimations.started(key);
       return;

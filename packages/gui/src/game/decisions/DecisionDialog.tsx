@@ -8,21 +8,19 @@ import type { Answer, CardId, Decision } from "@sve/core";
 import { useSettings } from "../../app/settings";
 import { useApp } from "../../app/store";
 import type { CardInfo, DecisionInfo } from "../../engine/protocol";
-import type { AbilityUpdate as GameUpdate } from "../../presentation/protocol";
-import { cardName } from "../../app/catalog";
+import type { GameUpdate } from "../../presentation/protocol";
+import { TriggerDie } from "./TriggerDie";
 import { findCard, isOnTable } from "../../engine/view-utils";
 import { useT, type MessageKey, type Translate } from "../../i18n";
 import { inDialog } from "../actions";
-import { locateAbilityText } from "../card/ability-text";
-import { displayAbilityHeading, displayAbilityText } from "../card/ability-display";
-import { AbilityPrompt } from "./AbilityPrompt";
-import { TriggerDie } from "./TriggerDie";
+import { abilityName, abilityText, giverName } from "../card/ability-display";
 import { CardTextLine, plainLine } from "../card/CardText";
 import { CardTile } from "../card/CardTile";
 import { setHighlight } from "../focus";
 import { sendAnswer, setRedrawing, toggleChosen, useInteraction } from "../interaction";
-import { abilityLabel, cardLabel } from "../labels";
+import { cardLabel } from "../labels";
 import { optionText } from "../options";
+import { ProcessingPrompt } from "./ProcessingPrompt";
 
 type Of<T extends Decision["type"]> = Extract<Decision, { type: T }>;
 
@@ -82,14 +80,16 @@ function ActionButton({
   );
 }
 
+/** The question, the card asking it, and above it what it is part of (a card or ability being played, ProcessingPrompt). */
 function Prompt({ text, source, update }: { text: string; source?: CardId | null; update: GameUpdate }) {
   const t = useT();
   const label = useLabel(update);
+  const processing = update.decision?.processing;
   return (
-    <div className={`sve-prompt${update.effectContext ? " sve-prompt-with-ability" : ""}`}>
-      <AbilityPrompt update={update} />
+    <div className={`sve-prompt${processing ? " sve-prompt-processing" : ""}`}>
+      <ProcessingPrompt update={update} />
       <span>{text}</span>
-      {source && !update.effectContext ? (
+      {source && !processing ? (
         <span className="sve-prompt-source" onMouseEnter={() => setHighlight([source])} onMouseLeave={() => setHighlight([])}>
           {t("decision.source", { card: label(source) })}
         </span>
@@ -99,9 +99,10 @@ function Prompt({ text, source, update }: { text: string; source?: CardId | null
 }
 
 /**
- * Which pending automatic ability to play next (CR 10.5.2.2): each one by its card and timing,
- * with its complete ability paragraph and actual text language (card/ability-text.ts).
- * Options that still read the same (copies of one card) are numbered; pointing at one shows its card on the table.
+ * Which pending automatic ability to play next (CR 10.5.2.2): each one by its card and timing (a keyword's by its keyword),
+ * with what it says — its whole paragraph of the card text, or the quote of the card that gave it (card/ability-display.ts) —
+ * two Fanfares of one card read the same otherwise. Options that still read the same (copies of one card) are numbered;
+ * pointing at one shows its card on the table.
  */
 function SelectPending({ d, info, update, answer, busy }: FormProps<"selectPending">) {
   const t = useT();
@@ -109,25 +110,17 @@ function SelectPending({ d, info, update, answer, busy }: FormProps<"selectPendi
   const catalog = useApp((s) => s.catalog)!;
   const { cardLang } = useSettings();
   const options = d.options.map((id) => {
-    const summary = info.abilities[id];
-    const context = update.pendingAbilities?.[id];
-    const source = context?.source ?? summary?.source;
-    const head = context ? displayAbilityHeading(context, update, catalog, cardLang, t) : `${source ? `${label(source)} — ` : ""}${abilityLabel(summary, t)}`;
-    const def = summary?.sourceDef && !summary.granted ? catalog.def(summary.sourceDef) : undefined;
-    const [timing, rank, count] = [summary?.timing, summary?.rank, summary?.count];
-    const text = context ? displayAbilityText(context, catalog, cardLang) :
-      def && timing !== undefined && rank !== undefined && count !== undefined
-        ? locateAbilityText(def, cardLang, timing, rank, count)
-        : null;
-    const provider = context?.providerDef ? t("decision.abilityProvider", { card: cardName(catalog.def(context.providerDef), cardLang) }) : null;
-    return { id, source, head, text, provider, die: context?.triggerDie };
+    const ability = info.abilities[id];
+    const source = ability?.source;
+    const head = `${source ? `${label(source)} — ` : ""}${abilityName(ability, t)}`;
+    return { id, source, head, text: abilityText(ability, catalog, cardLang), giver: giverName(ability, catalog, cardLang) };
   });
   return (
     <>
       <Prompt text={t("decision.selectPending")} update={update} />
       <div className="sve-actions sve-actions-column">
         {options.map((o) => {
-          const twins = options.filter((x) => x.head === o.head && x.text?.text === o.text?.text && x.provider === o.provider);
+          const twins = options.filter((x) => x.head === o.head && x.text?.text === o.text?.text && x.giver === o.giver);
           return (
             <ActionButton
               key={o.id}
@@ -140,9 +133,9 @@ function SelectPending({ d, info, update, answer, busy }: FormProps<"selectPendi
               <span>
                 {o.head}
                 {twins.length > 1 ? ` (${twins.indexOf(o) + 1})` : ""}
-                {o.die ? <> <TriggerDie die={o.die} /></> : null}
+                <TriggerDie die={update.pendingAbilities?.[o.id]?.triggerDie} />
               </span>
-              {o.provider ? <span className="sve-ability-provider">{o.provider}</span> : null}
+              {o.giver ? <span className="sve-processing-note">{t("decision.abilityGiver", { card: o.giver })}</span> : null}
               {o.text ? <CardTextLine className="sve-pending-text" line={o.text.text} lang={o.text.lang} /> : null}
             </ActionButton>
           );
@@ -223,7 +216,7 @@ function SelectCards({ d, info, update, answer, busy }: FormProps<"selectCards">
   );
 }
 
-export const CHOOSE_KEYS: Record<Of<"choose">["reason"], MessageKey> = {
+const CHOOSE_KEYS: Record<Of<"choose">["reason"], MessageKey> = {
   mode: "decision.choose.mode",
   playOption: "decision.choose.playOption",
   token: "decision.choose.token",
@@ -283,7 +276,7 @@ function Choose({ d, update, answer, busy }: FormProps<"choose">) {
   );
 }
 
-export const CONFIRM_KEYS: Record<Of<"confirm">["reason"], MessageKey> = {
+const CONFIRM_KEYS: Record<Of<"confirm">["reason"], MessageKey> = {
   optionalCost: "decision.confirm.optionalCost",
   earthRite: "decision.confirm.earthRite",
   effect: "decision.confirm.effect",

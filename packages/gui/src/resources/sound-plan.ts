@@ -4,22 +4,33 @@
 //    player (spells and amulets only have -p). A card's own sound comes before the common one, which is then not played
 //    for that card. <number> is tried as the printing, then the card's definition (an alternate art may have its own);
 //    for an evolved follower, its evolve card's first;
+//  - a leader's voices: public/audio/cards/<leader's number>-start (its player's turn begins: before "turn") and one for each
+//    quick chat line (-greet, -thank ...: net/messages.ts QUICK_CHATS, played as it is said, resources/sound.ts). In
+//    Cross Craft, the leader the game is played with (in front on the table);
 //  - background music: public/audio/bgm/<name>.<ext>, one per screen (BGM).
 // The effects keep to the animation's times (animation/plan.ts): a hit sounds as it shows, a destroyed card as it leaves.
 import type { CardId, CardType, DefId, PlayerId } from "@sve/core";
 import type { LogEntry } from "../engine/protocol";
-import { planTimeline, TIMING } from "../game/animation/plan";
+import type { QuickChatId } from "../net/messages";
+import { flightDelay, planFlights, planTimeline, TIMING } from "../game/animation/plan";
 
 /** The common sound effects: public/audio/sfx/<name>, and what is played instead when it is missing. */
 export const SFX = {
   /** Cards drawn. */
   draw: [],
+  /**
+   * A card put into a hand in public (searched and revealed, taken from a cemetery) is shown on the table
+   * (game/animation/reveal.ts): the other player's turning face up, one's own shaking.
+   */
+  search: [],
   /** A spell played. */
   spell: ["play"],
   /** A follower played. */
   follower: ["play"],
   /** An amulet played. */
   amulet: ["play"],
+  /** An activated ability played (CR 10.1.1.1, 8.3.1), but an evolve ability (CR 12.2.1): that one sounds as it evolves. */
+  activated: [],
   /** A follower attacks. */
   attack: [],
   /** Damage to a follower. */
@@ -69,8 +80,8 @@ export type SfxName = keyof typeof SFX;
 export const BGM = ["menu", "deck", "battle"] as const;
 export type BgmName = (typeof BGM)[number];
 
-/** A card's own sound: played ("p"), attacks ("a"), destroyed ("d"). */
-export type CardSoundKind = "p" | "a" | "d";
+/** A card's own sound: played ("p"), attacks ("a"), destroyed ("d"); a leader's voice: its player's turn ("start"), a quick chat line. */
+export type CardSoundKind = "p" | "a" | "d" | "start" | QuickChatId;
 
 /** A sound to play: a card's own if there is one (`card`), else the common one. */
 export interface SoundCue {
@@ -87,29 +98,40 @@ export interface SoundContext {
   typeOf(def: DefId): CardType | undefined;
   /** The numbers to look up for a card on the table now or just before the update: an evolved follower's evolve card first. */
   shownIds(id: CardId): string[];
+  /** The numbers to look up for a player's leader (its voices). */
+  leaderIds(player: PlayerId): string[];
   /** Keep to the animation's times (animations on); else everything sounds at once. */
   timed: boolean;
 }
 
 const PLAYED: Partial<Record<CardType, SfxName>> = { spell: "spell", follower: "follower", amulet: "amulet" };
 
+/** A card an update put into a hand in public (GameUpdate.toHand), and whether it is hidden there for the person (face down). */
+export interface RevealedCard {
+  id: CardId;
+  hidden: boolean;
+}
+
 /** The numbers of a card to look up: the printing, then the definition (no duplicates, none empty). */
 const numbers = (...ids: (string | null | undefined)[]): string[] => [...new Set(ids.filter((id): id is string => !!id && !id.includes(":")))];
 
-/** The sounds of an update (`skip`: the Quick play its announcement shows, which sounds as it opens). */
-export function planSounds(entries: readonly LogEntry[], ctx: SoundContext, skip: CardId | null = null): SoundCue[] {
+/**
+ * The sounds of an update (`skip`: the Quick play its announcement shows, which sounds as it opens; `revealed`: the cards it
+ * put into a hand in public).
+ */
+export function planSounds(entries: readonly LogEntry[], ctx: SoundContext, skip: CardId | null = null, revealed: readonly RevealedCard[] = []): SoundCue[] {
   const plan = planTimeline(entries, skip);
   const time = (at: number) => (ctx.timed ? at : 0);
   const hitAt = (id: CardId | null): number | undefined => (id !== null ? plan.hits.get(id) : undefined);
   const cues: SoundCue[] = [];
   const cue = (sfx: SfxName, at = 0, card?: SoundCue["card"]) => cues.push({ sfx, at: time(at), ...(card ? { card } : {}) });
-  for (const { event, cards } of entries) {
+  for (const { event, cards, ability } of entries) {
     switch (event.type) {
       case "gameStarted":
         cue("game-start");
         break;
       case "turnStarted":
-        cue("turn");
+        cue("turn", 0, { ids: ctx.leaderIds(event.player), kind: "start" });
         break;
       case "deckShuffled":
         cue("shuffle");
@@ -119,6 +141,9 @@ export function planSounds(entries: readonly LogEntry[], ctx: SoundContext, skip
         cue(sfx, 0, { ids: numbers(cards[event.card]?.printing, event.def), kind: "p" });
         break;
       }
+      case "abilityPlayed":
+        if (ability?.kind === "activated" && !ability.evolve) cue("activated");
+        break;
       case "attackDeclared": {
         const info = cards[event.attacker];
         const ids = numbers(...ctx.shownIds(event.attacker), info?.printing, info?.def);
@@ -168,5 +193,11 @@ export function planSounds(entries: readonly LogEntry[], ctx: SoundContext, skip
     }
   }
   if (plan.selections.length > 0) cue("target", Math.min(...plan.selections.map((s) => s.at)));
+  // Cards put into a hand in public, as the table shows them: once each has landed (its flight may wait for an arrow
+  // pointing at it, game/animation/reveal.ts); one's own, face up anyway, is only shaken with the animations on.
+  if (revealed.length > 0) {
+    const landing = new Map(planFlights(entries).flatMap((f) => (f.card !== null ? [[f.card, flightDelay(f, plan) + TIMING.flight] as const] : [])));
+    for (const { id, hidden } of revealed) if (hidden || ctx.timed) cue("search", landing.get(id) ?? 0);
+  }
   return cues;
 }

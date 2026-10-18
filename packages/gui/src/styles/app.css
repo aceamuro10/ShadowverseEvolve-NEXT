@@ -474,7 +474,6 @@ option {
 }
 
 .sve-card-frame {
-  container-type: inline-size;
   position: relative;
   width: var(--w);
   height: calc(var(--w) * 88 / 63);
@@ -622,7 +621,6 @@ option {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  font-size: 9px;
 }
 
 .sve-kw,
@@ -632,34 +630,6 @@ option {
   background: #000c;
   border-radius: 3px;
   padding: 0 3px;
-}
-
-.sve-card-keywords .sve-kw {
-  font-size: inherit;
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sve-card-keywords-dense {
-  font-size: 8px;
-  gap: 1px;
-}
-
-@container (max-width: 64px) {
-  .sve-card-keywords {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    font-size: 7px;
-    gap: 1px;
-  }
-
-  .sve-card-keywords .sve-kw {
-    line-height: 1.15;
-    padding: 0 1px;
-  }
 }
 
 .sve-card-counters {
@@ -790,16 +760,50 @@ option {
   right: 0;
   bottom: 0;
   z-index: 50;
-  width: clamp(280px, 24vw, 400px);
+  width: var(--sve-sidebar-width, clamp(280px, 24vw, 400px));
   border-left: 1px solid var(--sve-border);
   box-shadow: -12px 0 30px #0008;
 }
 
-.sve-sidebar-show {
+/* The top right of a game: the quick chat (game/QuickChat.tsx), then the sidebar's button while the sidebar is hidden;
+   with it shown, the quick chat is left of it. */
+.sve-game-corner {
   position: absolute;
   top: 8px;
   right: 10px;
   z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.sve-game-corner-sidebar {
+  right: calc(var(--sve-sidebar-width, clamp(280px, 24vw, 400px)) + 10px);
+}
+
+.sve-quick-chat {
+  position: relative;
+}
+
+/* Its seven lines, under it. */
+.sve-quick-chat-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 100%;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgb(20 26 36 / var(--sve-ui-alpha));
+  border: 1px solid var(--sve-action);
+  box-shadow: 0 10px 30px #000c;
+}
+
+.sve-quick-chat-menu button {
+  text-align: left;
+  white-space: nowrap;
 }
 
 .sve-sidebar-hide {
@@ -1075,6 +1079,102 @@ option {
   top: 3px;
 }
 
+/* A card put into a hand in public (searched, taken from a cemetery): the other player's turns face up in their hand,
+   larger and lit, shakes twice and turns back; one's own shakes twice. The times are the table's (animation/plan.ts). */
+.sve-hand-card.sve-card-revealed {
+  z-index: 30 !important;
+  pointer-events: none;
+}
+
+.sve-hand-opponent .sve-card-revealed {
+  --sve-card-width: var(--sve-reveal-width, calc(var(--sve-card-base) * 1.25));
+  margin-left: calc((var(--opponent-hand-card-width) - var(--sve-card-width)) / 2);
+}
+
+.sve-table[data-compact] .sve-hand-opponent .sve-card-revealed {
+  --sve-card-width: var(--sve-reveal-width, calc(var(--sve-card-base) * 1.6));
+}
+
+.sve-card-revealed .sve-card-face,
+.sve-card-searched .sve-card-face {
+  box-shadow:
+    0 0 0 2px var(--sve-reveal-glow, var(--sve-accent)),
+    0 0 16px 3px var(--sve-reveal-glow, var(--sve-accent));
+}
+
+.sve-reveal-in .sve-card-frame {
+  animation: sve-reveal-in 600ms ease-out;
+}
+
+.sve-reveal-out .sve-card-frame {
+  animation: sve-reveal-out 150ms ease-in forwards;
+}
+
+.sve-reveal-down .sve-card-frame {
+  animation: sve-reveal-down 150ms ease-out;
+}
+
+.sve-card-searched .sve-card-frame {
+  animation: sve-reveal-shake 420ms ease-in-out;
+}
+
+@keyframes sve-reveal-in {
+  0% {
+    transform: perspective(700px) rotateY(90deg);
+  }
+  25% {
+    transform: perspective(700px) rotateY(0deg) translateX(0);
+  }
+  40% {
+    transform: perspective(700px) translateX(calc(var(--sve-reveal-shake, 6px) * -1));
+  }
+  55% {
+    transform: perspective(700px) translateX(var(--sve-reveal-shake, 6px));
+  }
+  70% {
+    transform: perspective(700px) translateX(calc(var(--sve-reveal-shake, 6px) * -1));
+  }
+  85% {
+    transform: perspective(700px) translateX(var(--sve-reveal-shake, 6px));
+  }
+  100% {
+    transform: perspective(700px) translateX(0);
+  }
+}
+
+@keyframes sve-reveal-out {
+  from {
+    transform: perspective(700px) rotateY(0deg);
+  }
+  to {
+    transform: perspective(700px) rotateY(90deg);
+  }
+}
+
+@keyframes sve-reveal-down {
+  from {
+    transform: perspective(700px) rotateY(-90deg);
+  }
+  to {
+    transform: perspective(700px) rotateY(0deg);
+  }
+}
+
+@keyframes sve-reveal-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(calc(var(--sve-reveal-shake, 6px) * -1));
+  }
+  40%,
+  80% {
+    transform: translateX(var(--sve-reveal-shake, 6px));
+  }
+}
+
 /* Beside the mats: each player's panel, the turn and the buttons that finish a decision. */
 .sve-player-panel {
   position: absolute;
@@ -1139,8 +1239,7 @@ option {
   color: #ffe08a;
 }
 
-.sve-player-counts,
-.sve-player-order {
+.sve-player-counts {
   color: var(--sve-muted);
 }
 
@@ -1220,6 +1319,17 @@ option {
 .sve-center-turn strong {
   font-size: 15px;
   color: #fff;
+}
+
+/* Online play with a turn time limit: whose time runs and how much is left; the last 30 seconds stand out. */
+.sve-center-clock {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sve-center-clock-low {
+  color: var(--sve-bad);
+  font-weight: 700;
 }
 
 .sve-center-prompt {
@@ -1584,76 +1694,6 @@ option {
   margin-top: 4px;
 }
 
-/* A standalone, nonmodal notice: only its own panel receives pointer events. */
-.sve-announce.sve-hand-gain,
-.sve-table[data-compact] .sve-announce.sve-hand-gain {
-  width: min(220px, calc(var(--side-width, 270px) - 20px));
-  max-height: min(360px, calc(100% - 64px));
-  padding: 8px;
-  gap: 6px;
-  cursor: pointer;
-}
-.sve-hand-gain > :not(.sve-hand-gain-cards) {
-  flex-shrink: 0;
-}
-.sve-hand-gain-countdown {
-  width: 100%;
-  height: 3px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgb(110 200 255 / 0.15);
-  pointer-events: none;
-}
-.sve-hand-gain-countdown > span {
-  display: block;
-  height: 100%;
-  background: #6ec8ff;
-  transform-origin: left;
-  transition: transform 100ms linear;
-}
-.sve-hand-gain-countdown[data-ending] > span {
-  background: #edb75f;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sve-hand-gain-countdown > span { transition: none; }
-}
-.sve-hand-gain-cards {
-  --sve-card-width: min(92px, calc((var(--side-width, 270px) - 54px) / 2));
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  min-height: 0;
-  width: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 4px;
-}
-.sve-hand-gain-cards figure {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.sve-hand-gain-cards figure:only-child {
-  --sve-card-width: min(100px, calc(var(--side-width, 270px) - 46px));
-  grid-column: 1 / -1;
-}
-.sve-hand-gain-cards figcaption {
-  display: flex;
-  flex-direction: column;
-  text-align: center;
-  overflow-wrap: anywhere;
-  line-height: 1.3;
-}
-.sve-hand-gain-effect {
-  width: 100%;
-  text-align: center;
-  overflow-wrap: anywhere;
-  color: var(--sve-muted);
-}
-
 /*
  * Cards one has just looked at (board/LookedCards.tsx; the top card of one's deck with nothing to take, or an ability that only
  * looks): the table waits under a light shade, the cards in the middle with their names and OK. Only the player who looked
@@ -1903,56 +1943,6 @@ option {
   color: var(--sve-muted);
 }
 
-.sve-ability-context {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.sve-ability-heading {
-  text-align: left;
-  color: #ffe6a8;
-}
-
-.sve-ability-text {
-  display: block;
-  white-space: pre-line;
-  line-height: 1.5;
-  font-weight: 400;
-}
-
-.sve-ability-provider {
-  display: block;
-  font-size: 11px;
-  color: var(--sve-muted);
-}
-
-.sve-ability-compact summary {
-  cursor: pointer;
-  color: #ffe6a8;
-}
-
-.sve-ability-compact details {
-  position: relative;
-}
-
-.sve-ability-expanded {
-  position: absolute;
-  left: calc(100% + 12px);
-  top: 0;
-  z-index: 30;
-  width: min(320px, 45vw);
-  max-height: min(240px, 38vh);
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid rgba(110, 200, 255, 0.35);
-  border-radius: 8px;
-  background: #142033;
-  box-shadow: 0 4px 18px #0008;
-}
-
 .sve-prompt {
   display: flex;
   gap: 12px;
@@ -1960,15 +1950,60 @@ option {
   font-weight: 600;
 }
 
-.sve-prompt-with-ability {
-  flex-direction: column;
-  align-items: stretch;
-}
-
 .sve-prompt-source {
   font-weight: 400;
   color: var(--sve-muted);
   font-size: 12px;
+}
+
+/* A question asked while a card or ability is being played: what it is part of, above the question. */
+.sve-prompt-processing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.sve-processing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 400;
+}
+
+.sve-processing-heading,
+.sve-processing-compact summary {
+  color: var(--sve-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sve-processing-note {
+  display: block;
+  font-size: 12px;
+  color: var(--sve-muted);
+}
+
+.sve-processing-text {
+  display: block;
+  white-space: pre-line;
+  line-height: 1.5;
+  font-size: 13px;
+  color: var(--sve-text);
+}
+
+/* Beside the table: one line that opens the text. */
+.sve-processing-compact .sve-processing-body {
+  max-height: 30vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: 4px;
+}
+
+/* A small screen: the status between the two player panels stays short (the text scrolls). */
+.sve-table[data-compact] .sve-processing-compact .sve-processing-body {
+  max-height: 18vh;
 }
 
 .sve-actions {
@@ -2154,20 +2189,21 @@ option {
   color: var(--sve-muted);
 }
 
+/* The play points one of the viewer's cards in their hand or EX area takes to play now, when it isn't its cost. */
+.sve-details-play-cost.sve-cheaper strong {
+  color: var(--sve-good);
+}
+
+.sve-details-play-cost.sve-dearer strong {
+  color: var(--sve-bad);
+}
+
 .sve-details-state,
 .sve-details-flags {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   font-size: 13.5px;
-}
-
-.sve-details-current-state .sve-details-flags span {
-  padding: 1px 4px;
-  border: 1px solid var(--sve-muted);
-  border-radius: 4px;
-  max-width: 100%;
-  overflow-wrap: anywhere;
 }
 
 .sve-card-text {
@@ -2177,6 +2213,19 @@ option {
 
 .sve-card-text p {
   margin: 0 0 4px;
+}
+
+/* A token the text names: a click shows its card in the panel. Words of the text, only underlined. */
+.sve-card-link {
+  color: var(--sve-card-link, inherit);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.sve-card-link:hover,
+.sve-card-link:focus-visible {
+  text-decoration-style: solid;
 }
 
 /* Below a card's text in a game: the abilities it was given, as the giving card quotes them, and that it lost them all. */
@@ -2287,6 +2336,19 @@ option {
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+/* Online, how a player's program answers their quick windows: the debug tab's first part. */
+.sve-debug-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(110, 200, 255, 0.22);
+}
+
+.sve-debug-quick .sve-hint {
+  margin: 0 0 4px;
 }
 
 .sve-debug-row input[type="number"] {
@@ -3385,6 +3447,24 @@ option {
   gap: 6px;
 }
 
+/* The turn time limit: its checkbox, then its seconds while it is on. */
+.sve-online-turn-limit {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.sve-online-turn-limit-seconds {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sve-online-turn-limit-seconds input {
+  width: 5.5em;
+}
+
 .sve-online-lobby h4 {
   margin: 4px 0 6px;
   font-size: 14px;
@@ -3793,9 +3873,13 @@ button.sve-online-thanks-sponsor:hover {
   z-index: 50;
 }
 
-.sve-game-compact .sve-sidebar-show {
+.sve-game-compact .sve-game-corner {
   top: 6px;
   right: 8px;
+}
+
+.sve-game-compact .sve-game-corner-sidebar {
+  right: calc(var(--sve-sidebar-width, clamp(280px, 24vw, 400px)) + 8px);
 }
 
 /* A finger on the table (a phone, a tablet): no scrolling, zooming or long-press menu of the browser (dragging a card is
@@ -3849,6 +3933,10 @@ button.sve-online-thanks-sponsor:hover {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.sve-table[data-compact] .sve-center-status-timed .sve-center-prompt {
+  -webkit-line-clamp: 2;
 }
 
 .sve-table[data-compact] .sve-center-actions {
@@ -3984,6 +4072,85 @@ button.sve-online-thanks-sponsor:hover {
   -webkit-touch-callout: none;
 }
 
+
+/* gui-dev notices, status flags and serial dice playback. */
+.sve-player-counts,
+.sve-player-order {
+  color: var(--sve-muted);
+}
+/* A standalone, nonmodal notice: only its own panel receives pointer events. */
+.sve-announce.sve-hand-gain,
+.sve-table[data-compact] .sve-announce.sve-hand-gain {
+  width: min(220px, calc(var(--side-width, 270px) - 20px));
+  max-height: min(360px, calc(100% - 64px));
+  padding: 8px;
+  gap: 6px;
+  cursor: pointer;
+}
+.sve-hand-gain > :not(.sve-hand-gain-cards) {
+  flex-shrink: 0;
+}
+.sve-hand-gain-countdown {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgb(110 200 255 / 0.15);
+  pointer-events: none;
+}
+.sve-hand-gain-countdown > span {
+  display: block;
+  height: 100%;
+  background: #6ec8ff;
+  transform-origin: left;
+  transition: transform 100ms linear;
+}
+.sve-hand-gain-countdown[data-ending] > span {
+  background: #edb75f;
+}
+.sve-hand-gain-cards {
+  --sve-card-width: min(92px, calc((var(--side-width, 270px) - 54px) / 2));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+}
+.sve-hand-gain-cards figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.sve-hand-gain-cards figure:only-child {
+  --sve-card-width: min(100px, calc(var(--side-width, 270px) - 46px));
+  grid-column: 1 / -1;
+}
+.sve-hand-gain-cards figcaption {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.sve-hand-gain-effect {
+  width: 100%;
+  text-align: center;
+  overflow-wrap: anywhere;
+  color: var(--sve-muted);
+}
+.sve-details-current-state .sve-details-flags span {
+  padding: 1px 4px;
+  border: 1px solid var(--sve-muted);
+  border-radius: 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 /* Dice stay above the table while all rule answer entry points wait for their visible result. */
 .sve-dice-overlay {
   position: fixed; z-index: 90; left: 50%; top: 38%; transform: translate(-50%, -50%);

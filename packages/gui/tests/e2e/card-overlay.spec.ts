@@ -97,10 +97,10 @@ test("costs follow normal taxes and next-card consumption across table, browser,
   await expect(tile(page, base).locator(".sve-stat-cost")).not.toHaveClass(/sve-up|sve-down/);
 
   await tile(page, hand).hover();
-  const detail = page.getByTestId("details-cost");
-  await expect(detail).toContainText("Cost");
+  const detail = page.getByTestId("details-play-cost");
+  await expect(detail).toContainText("Play cost");
   await expect(detail.locator("strong")).toHaveText("0");
-  await expect(detail.locator("small")).toHaveText("printed 2");
+  await expect(page.getByTestId("details-cost").locator("strong")).toHaveText("2");
   await openZone(page, "ex");
   await expect(page.locator(`.sve-modal .sve-card[data-card="${ex}"] .sve-stat-cost`)).toHaveText("0");
   await page.keyboard.press("Escape");
@@ -121,7 +121,7 @@ test("costs follow normal taxes and next-card consumption across table, browser,
   await expect(page.locator(`.sve-modal .sve-card[data-card="${ex}"] .sve-stat-cost`)).toHaveText("3");
   await expect(detail.locator("strong")).toHaveText("3");
   await page.keyboard.press("Escape");
-  for (const [uiLang, label] of [["zh", "费用"], ["zh-Hant", "費用"], ["ja", "コスト"], ["en", "Cost"]]) {
+  for (const [uiLang, label] of [["zh", "使用时的消费"], ["zh-Hant", "使用時的消費"], ["ja", "プレイコスト"], ["en", "Play cost"]]) {
     const before = await inputs(page);
     await page.evaluate(async uiLang => {
       const path = "/src/app/settings.ts";
@@ -157,63 +157,14 @@ test("BP14-046 previews all shared-group members and refreshes the others after 
   await expect(page.getByTestId("details-cost").locator("strong")).not.toHaveText("0");
 });
 
-test("keywords show four text labels, an overflow count and smaller type on dense or tiny cards", async ({ page }) => {
+test("keywords follow main's three-label layout with an overflow count", async ({ page }) => {
   await boot(page);
-  const handId = await getCard(page, "BP01-001");
-  await manual(page, { kind: "move", card: handId, to: "field" });
+  const id0 = await getCard(page, "BP01-001");
+  await manual(page, { kind: "move", card: id0, to: "field" });
   const id = await cardId(page, "BP01-001", "field");
-  await manual(page, { kind: "token", player: 1, token: "BP01-T03", to: "field" });
-  const card = tile(page, id);
-  const labels = card.locator(".sve-card-keywords .sve-kw");
-  await expect(card.locator(".sve-card-keywords")).toHaveCount(0);
-  const keywords: Keyword[] = ["ward", "bane", "rush", "storm", "assail", "intimidate", "drain", "aura"];
-  for (const keyword of keywords.slice(0, 4)) await manual(page, { kind: "keyword", card: id, keyword });
-  await expect(labels).toHaveText(["Ward", "Bane", "Rush", "Storm"]);
-  const normalSize = await labels.first().evaluate(el => parseFloat(getComputedStyle(el).fontSize));
-  await manual(page, { kind: "keyword", card: id, keyword: keywords[4]! });
-  await expect(labels).toHaveText(["Ward", "Bane", "Rush", "Storm", "+1"]);
-  await expect(card.locator("button, svg")).toHaveCount(0);
-  // Starting on the overflow count still starts the card's normal attack drag.
-  const before = await inputs(page);
-  const more = (await labels.last().boundingBox())!;
-  await page.mouse.move(more.x + more.width / 2, more.y + more.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(more.x + 80, more.y - 40, { steps: 5 });
-  await expect(page.locator(".sve-arrow-drag")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await page.mouse.up();
-  expect(await inputs(page)).toBe(before);
-  for (const keyword of keywords.slice(5)) await manual(page, { kind: "keyword", card: id, keyword });
-  await expect(labels).toHaveText(["Ward", "Bane", "Rush", "Storm", "+4"]);
-  expect(await labels.first().evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeLessThan(normalSize);
-  await card.hover();
-  await expect(page.locator(".sve-details-state")).toContainText("Aura");
-  await openZone(page, "field");
-  const browser = page.locator(`.sve-modal .sve-card[data-card="${id}"]`);
-  await expect(browser.locator(".sve-kw")).toHaveText(["Ward", "Bane", "Rush", "Storm", "+4"]);
-  await page.keyboard.press("Escape");
-  await page.evaluate(async () => {
-    const path = "/src/app/settings.ts";
-    (await import(/* @vite-ignore */ path)).updateSettings({ uiLang: "zh-Hant" });
-  });
-  await expect(labels).toHaveText(["守護", "毀滅", "突進", "疾馳", "+4"]);
-  await page.setViewportSize({ width: 915, height: 412 });
-  // Exercise the actual frame width, including the small-card variant.
-  await card.evaluate(el => {
-    el.classList.add("sve-card-small");
-    (el as HTMLElement).style.setProperty("--w", "44px");
-  });
-  await expect(labels).toHaveCount(5);
-  expect(await labels.first().evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBe(7);
-  const frame = (await card.locator(".sve-card-frame").boundingBox())!;
-  for (const label of await labels.all()) {
-    const box = (await label.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(frame.x);
-    expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width);
-    expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height - 44 * 0.24 - 2);
-  }
-  expect(await labels.first().evaluate(el => getComputedStyle(el).pointerEvents)).toBe("none");
-  await page.screenshot({ path: test.info().outputPath("keywords-text-narrow.png") });
+  for (const keyword of ["ward", "bane", "rush", "storm", "assail", "intimidate", "drain", "aura"] as Keyword[]) await manual(page, { kind: "keyword", card: id, keyword });
+  await expect(tile(page, id).locator(".sve-card-keywords .sve-kw")).toHaveText(["Ward", "Bane", "Rush", "+5"]);
+  await expect(tile(page, id).locator(".sve-keyword-expander")).toHaveCount(0);
 });
 
 test("clicking keyword text or its overflow count selects the card normally", async ({ page }) => {

@@ -16,10 +16,25 @@ describe("importing resources from a zip", () => {
     expect(resourcePathInZip("MyPack/public/fonts/a.woff2")).toBe("fonts/a.woff2");
     expect(resourcePathInZip("theme.css")).toBe("theme.css");
     expect(resourcePathInZip("MyPack/theme.css")).toBe("theme.css");
+    // The player's card texts.
+    expect(resourcePathInZip("MyPack/public/text/BP22_cn.json")).toBe("text/BP22_cn.json");
     expect(resourcePathInZip("images\\backs\\default.png")).toBe("images/backs/default.png");
     // Not resources: folders, other files, hidden files, macOS copies, climbing out, two folders deep around them.
     for (const name of ["images/", "readme.txt", "MyPack/readme.txt", "images/.DS_Store", "__MACOSX/images/cards/a.png", "../images/cards/a.png", "images/../../x.png", "A/B/images/cards/a.png", "images"]) {
       expect(resourcePathInZip(name)).toBeNull();
+    }
+  });
+
+  it("puts a whole public folder in as it is, however deep in the zip and however written", () => {
+    // The PC release's public/ zipped as it is (a pack someone made): all of it, its own files and folders too.
+    expect(resourcePathInZip("public/images/cards/BP01-001.webp")).toBe("images/cards/BP01-001.webp");
+    expect(resourcePathInZip("public/readme.txt")).toBe("readme.txt");
+    expect(resourcePathInZip("public/images/credits/beardad.png")).toBe("images/credits/beardad.png");
+    expect(resourcePathInZip("资源包/SVEN-0.4.1-pc/public/text/BP22_cn.json")).toBe("text/BP22_cn.json");
+    expect(resourcePathInZip("Public\\audio\\bgm\\menu.mp3")).toBe("audio/bgm/menu.mp3");
+    // Its folder entries, hidden files and macOS copies stay out.
+    for (const name of ["public/", "public", "public\\audio\\", "public/.gitignore", "public/images/cards/.gitkeep", "__MACOSX/public/theme.css"]) {
+      expect(resourcePathInZip(name), name).toBeNull();
     }
   });
 });

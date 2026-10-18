@@ -43,6 +43,8 @@ export interface ImportResult {
   written: number;
   /** Files of the zip outside the resource folders (README "Custom resources"), not imported. */
   skipped: number;
+  /** Files that should have gone in but couldn't be read (another compression, a broken one): "name (why)". */
+  failed: string[];
 }
 
 export interface Host {
@@ -51,6 +53,11 @@ export interface Host {
   info(): Promise<HostInfo>;
   /** Every file under public/ ("images/cards/BP01-001.png", ...). */
   resources(): Promise<string[]>;
+  /**
+   * The card text files of this machine (packages/core/data/<SET>_<lang>.json, not in the repository): the dev server's, which
+   * has them; none in a release or the apps (their texts are the player's, public/text/). Unchecked JSON.
+   */
+  builtInCardTexts(): Promise<unknown[]>;
   listDecks(): Promise<DeckFileEntry[]>;
   loadDeck(file: string): Promise<DeckFile>;
   saveDeck(file: string, deck: DeckFile): Promise<void>;
@@ -87,7 +94,7 @@ export interface Host {
   /** The Android app: how many resources are built into it (a release with resources; host/bundled.ts). */
   readonly bundledResources?: number;
   /** The Android app: import resources from a zip file into that folder. */
-  importResources?(file: File, progress: (written: number) => void): Promise<ImportResult>;
+  importResources?(file: File, progress: (done: number, total: number) => void): Promise<ImportResult>;
 }
 
 const encodePath = (path: string): string => path.split("/").map(encodeURIComponent).join("/");
@@ -109,6 +116,12 @@ export const serverHost: Host = {
   info: () => getJson<HostInfo>("/api/host"),
 
   resources: async () => (await getJson<{ files: string[] }>("/api/resources")).files,
+
+  // A release's server has no such files (and no such address): none.
+  builtInCardTexts: async () => {
+    const res = await fetch("/api/card-texts");
+    return res.ok ? ((await res.json()) as { files: unknown[] }).files : [];
+  },
 
   listDecks: async () => (await getJson<{ decks: DeckFileEntry[] }>("/api/decks")).decks,
 
@@ -200,6 +213,7 @@ export const hostApi: Host = {
   },
   info: () => current.info(),
   resources: () => current.resources(),
+  builtInCardTexts: () => current.builtInCardTexts(),
   listDecks: () => current.listDecks(),
   loadDeck: (file) => current.loadDeck(file),
   saveDeck: (file, deck) => current.saveDeck(file, deck),

@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { useSettings } from "./helpers";
+import { hasCardTexts, useSettings } from "./helpers";
 
 // The deck builder (stage 5): filters, adding by click and drag, removing by right-click and by dragging back to the pool,
 // the leader window, save as / delete; the format (Cross Craft: two leaders) and what a deck doesn't meet, told on saving
@@ -286,5 +286,32 @@ test("a deck that can't be loaded is told, and the builder goes on with a new de
   await expect(page.getByTestId("format-problems")).toContainText("The main deck has 0 cards");
   await page.getByTestId("format-problems-leave").click();
   await expect(page.getByTestId("menu-decks")).toBeVisible();
+  expect(problems).toEqual([]);
+});
+
+test("the card panel: a token a card's text names opens that token there (click or keyboard); the name wraps with the text", async ({ page }) => {
+  test.skip(!hasCardTexts, "no card text files on this machine (npm run build:cards writes them)");
+  const problems: string[] = [];
+  page.on("pageerror", (e) => problems.push(e.message));
+  await useSettings(page, { uiLang: "en", cardLang: "en", builderDeck: null });
+  await openBuilder(page);
+  // BP01-020 summons Fairies (BP01-T03).
+  await page.getByTestId("builder-search").fill("BP01-020");
+  await settled(page);
+  const card = page.locator(".sve-pool-tile").first();
+  await card.hover();
+  const link = page.getByTestId("card-text-link").first();
+  await expect(link).toHaveAttribute("data-def", "BP01-T03");
+  await expect(link).toHaveText("Fairy");
+  // Inline text, not a box: a long name breaks across lines like the words around it.
+  expect(await link.evaluate((e) => getComputedStyle(e).display)).toBe("inline");
+  await link.click();
+  await expect(page.locator(".sve-details-name")).toHaveText("Fairy");
+  await expect(page.getByTestId("card-text-link")).toHaveCount(0);
+  // From the keyboard too.
+  await card.hover();
+  await page.getByTestId("card-text-link").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".sve-details-name")).toHaveText("Fairy");
   expect(problems).toEqual([]);
 });

@@ -1,9 +1,18 @@
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 // Shared steps of the end-to-end tests: settings before the page loads, the way from the main menu into a game, and
 // answering decisions the way a person does: on the table (lit cards and their menus, the buttons beside the mats) or in
 // the decision window.
 export const SETTINGS_KEY = "sve-gui-settings";
+
+/**
+ * Whether the GUI has local card texts, from the data build or the player's public/text resources.
+ * The repository doesn't ship them; text-specific assertions are skipped when neither source is present.
+ */
+export const hasCardTexts = existsSync(fileURLToPath(new URL("../../../core/data/BP01_en.json", import.meta.url))) ||
+  existsSync(fileURLToPath(new URL("../../public/text/BP01_en.json", import.meta.url)));
 
 /** Settings the page starts with (the app reads them from localStorage). */
 export async function useSettings(page: Page, settings: Record<string, unknown>): Promise<void> {
@@ -68,13 +77,27 @@ export async function dialogBody(page: Page): Promise<Locator | null> {
 }
 
 /**
+ * OK on the announcement shown (a tap on a touch screen). The window closes by itself after 3 seconds, so it may be gone
+ * first; a click that fails while it is still there fails the test (a button covered or out of reach).
+ */
+export async function pressAnnouncementOk(page: Page, tap = false): Promise<void> {
+  const ok = page.getByTestId("announcement-ok");
+  try {
+    // (Within the 3 seconds it has: its window settles first, slower on a busy machine.)
+    await (tap ? ok.tap({ timeout: 2_500 }) : ok.click({ timeout: 2_500 }));
+  } catch (err) {
+    if ((await ok.count()) > 0) throw err;
+  }
+}
+
+/**
  * A Quick card or ability resolved and the game waits until it has been seen (board/QuickAnnouncement.tsx): OK, then wait
  * until that announcement is gone (the next one may follow at once).
  */
 export async function acknowledge(page: Page): Promise<void> {
   const bar = page.locator(".sve-decision");
   const seq = await bar.getAttribute("data-announcement");
-  await page.getByTestId("announcement-ok").click();
+  await pressAnnouncementOk(page);
   if (seq !== null) await expect(bar).not.toHaveAttribute("data-announcement", seq);
 }
 
@@ -196,8 +219,7 @@ async function answerInDialog(body: Locator, kind: string, choose: (n: number) =
   }
   // The hand's order for a redraw (left open by an earlier step): redraw as it is.
   if (kind === "mulligan") return (await body.getByTestId("mulligan-redraw").click(), "redraw");
-  // Source inspection is an explanatory control, not an answer to the decision.
-  const buttons = body.locator("button:not([disabled]):not(.sve-ability-heading)");
+  const buttons = body.locator("button:not([disabled])");
   const n = await buttons.count();
   expect(n, `no button to answer ${kind}`).toBeGreaterThan(0);
   const button = buttons.nth(choose(n));
@@ -209,10 +231,37 @@ async function answerInDialog(body: Locator, kind: string, choose: (n: number) =
 /** Answer what comes (the redraws, the opponent's turn ...) until the person's main phase. */
 export async function toMainPhase(page: Page): Promise<void> {
   for (let i = 0; i < 40; i++) {
-    const kind = (await page.locator(".sve-decision").getAttribute("data-decision"))!;
-    if (kind === "mainPhase") return;
-    if (kind !== "waiting") await answer(page, kind);
+    const decision = page.locator(".sve-decision");
+    if ((await decision.getAttribute("class"))?.includes("sve-busy")) {
+      await page.waitForTimeout(100);
+      continue;
+    }
+    const kind = (await decision.getAttribute("data-decision"))!;
+    // A submitted answer keeps the previous view briefly; its disabled controls are not a new main phase.
+    if (kind === "mainPhase") {
+      if (await page.getByTestId("table-end").isEnabled()) return;
+    } else if (kind !== "waiting") await answer(page, kind);
     await page.waitForTimeout(100);
   }
   throw new Error("no main phase");
 }
+
+/**
+ * As if the player had these files in public/ ("audio/sfx/search.mp3", "audio/cards/SD01-LD01-greet.mp3"): the page's audio
+ * elements only note what they would play (src/resources/sound.ts), which playedSounds tells.
+ */
+export async function recordSounds(page: Page, files: string[]): Promise<void> {
+  await page.evaluate(`(async () => {
+    window.__played = [];
+    window.Audio = class {
+      constructor(url) { this.src = url; this.paused = true; this.volume = 1; this.loop = false; }
+      play() { this.paused = false; window.__played.push(this.src.split("/").pop()); return Promise.resolve(); }
+      pause() { this.paused = true; }
+    };
+    const lookup = await import("/src/resources/lookup.ts");
+    lookup.setResourceLists(${JSON.stringify(files)}, []);
+  })()`);
+}
+
+/** The sound files played since recordSounds, by name ("SD01-LD01-greet.mp3"). */
+export const playedSounds = (page: Page): Promise<string[]> => page.evaluate(() => (window as unknown as { __played: string[] }).__played);

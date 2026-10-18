@@ -11,6 +11,8 @@ import { expectSameInputs, playAtRandom, readyBoth, watchProblems } from "./onli
 // program; its server configuration is what the settings' window keeps in the browser.
 
 const SERVER = "[server]\nname = e2e\naddress = ws://127.0.0.1:5198\nkey = e2e-test-key-0001\n";
+/** Another group's server (tests/e2e/relay2.ini: two spectator seats a room, its own key). */
+const FRIENDS = "[server]\nname = friends\naddress = ws://127.0.0.1:5197\nkey = e2e-test-key-0002\n";
 
 /** A program at its online screen, with this server configuration ("" : none). */
 async function openOnline(browser: Browser, config: string, settings: Record<string, unknown> = {}, prepare?: (page: Page) => Promise<void>): Promise<Page> {
@@ -50,7 +52,7 @@ test("through the online server: a room made with its rules, joined by code, wat
   await guest.getByTestId("online-server-join").click();
   for (const page of [host, guest]) {
     await expect(page.getByTestId("online-connected")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("online-via")).toHaveText("the online server");
+    await expect(page.getByTestId("online-via")).toHaveText("the online server (e2e)");
     await expect(page.locator(".sve-online-facts")).toContainText("Connection: through the server");
     await expect(page.getByTestId("online-rtt")).toHaveText(/\d+ ms/, { timeout: 15_000 });
   }
@@ -259,7 +261,8 @@ test("the Chinese online screen has the three boxes at its bottom, the sponsor's
 /** The cards of a seat's hand on a page, and how many of them show their face. */
 async function handFaces(page: Page, seat: 0 | 1): Promise<{ cards: number; faces: number }> {
   const cards = await page.locator(`[data-zone="${seat}:hand"] [data-card]`).count();
-  const backs = await page.locator(`[data-zone="${seat}:hand"] [data-card][data-hidden="true"]`).count();
+  // A card put into the hand in public is shown face up a moment (public): it is a back here.
+  const backs = await page.locator(`[data-zone="${seat}:hand"] :is([data-card][data-hidden="true"], [data-card].sve-card-revealed)`).count();
   return { cards, faces: cards - backs };
 }
 
@@ -322,11 +325,21 @@ test("a room with a password, whose spectators may chat and see the hands; the o
   await host.getByTestId("online-ready").click();
   for (const page of [host, guest, spectator]) await expect(page.locator(".sve-table")).toBeVisible({ timeout: 30_000 });
 
+  // A player's quick chat line: all three see who said it (by name); a spectator has no quick chat.
+  await expect(spectator.getByTestId("quick-chat")).toHaveCount(0);
+  await host.getByTestId("quick-chat").click();
+  await host.getByTestId("quick-chat-greet").click();
+  await Promise.all([host, guest, spectator].map((page) => expect(page.getByTestId("chat-notice")).toHaveText("Host sent: Hello.")));
+
   // The spectator sees no hand until it turns "reveal all" on (its debug tab has it: the host allows it); then both.
   await expect.poll(async () => (await handFaces(spectator, 0)).cards, { timeout: 30_000 }).toBeGreaterThan(0);
   for (const seat of [0, 1] as const) expect((await handFaces(spectator, seat)).faces).toBe(0);
   await spectator.getByTestId("sidebar-show").click();
   await spectator.getByTestId("tab-debug").click();
+  // How a player's program answers their quick windows: a player's choice, not a spectator's (who may block the quick chat
+  // for themself).
+  await expect(spectator.getByTestId("debug-fake-quick")).toHaveCount(0);
+  await expect(spectator.getByTestId("debug-block-quick-chat")).toBeVisible();
   // (Checked once the engine worker's update says so.)
   await spectator.getByTestId("debug-reveal-all").click();
   await expect(spectator.getByTestId("debug-reveal-all")).toBeChecked();
@@ -336,10 +349,11 @@ test("a room with a password, whose spectators may chat and see the hands; the o
       return hand.cards > 0 && hand.faces === hand.cards;
     }).toBe(true);
   }
-  // A player never has it.
+  // A player never has it; the quick windows' options are theirs.
   await guest.getByTestId("sidebar-show").click();
   await guest.getByTestId("tab-debug").click();
   await expect(guest.getByTestId("debug-reveal-all")).toHaveCount(0);
+  await expect(guest.getByTestId("debug-quick")).toBeVisible();
   expect((await handFaces(guest, 0)).faces).toBe(0);
   expect(problems).toEqual([]);
 });
@@ -374,4 +388,149 @@ test("the server's configuration: none, pasted in the settings' window, tested; 
   await page.getByTestId("online-back").click();
   await page.getByTestId("menu-settings").click();
   await expect(page.getByTestId("settings-server")).toHaveText("e2e");
+});
+
+test("two servers: one lobby lists the rooms of both; a room made on the second one is found by its code, and watched", async ({ browser }) => {
+  test.setTimeout(240_000);
+  const problems: string[] = [];
+  const both = `${SERVER}\n${FRIENDS}`;
+  const host = await openOnline(browser, both, { playerName: "Aki", setupDecks: ["samples/sd01.json", "samples/sd02.json"] });
+  const guest = await openOnline(browser, both, { setupDecks: ["samples/sd03.json", "samples/sd02.json"] });
+  // A spectator of the other group: its own server first.
+  const spectator = await openOnline(browser, `${FRIENDS}\n${SERVER}`);
+  watchProblems([host, guest, spectator], problems);
+  await expect(host.getByTestId("online-server").locator("h3")).toHaveText("Use the server (e2e, friends)");
+  await expect(spectator.getByTestId("online-server-host-on")).toHaveValue("ws://127.0.0.1:5197");
+
+  // A code on neither server: said so.
+  await spectator.getByTestId("online-server-code").fill("ZZZZZZ");
+  await spectator.getByTestId("online-server-join").click();
+  await expect(spectator.getByTestId("online-closed")).toHaveText("There is no room of that code: check the code, or the host has left.");
+  await spectator.getByTestId("online-again").click();
+
+  // The host makes the room on the second server of its configuration; every lobby lists it, said to be there.
+  await host.getByTestId("online-server-host-on").selectOption({ label: "friends" });
+  await host.getByTestId("online-server-host").click();
+  const code = (await host.getByTestId("online-room-code").innerText({ timeout: 30_000 })).trim();
+  for (const page of [guest, spectator]) {
+    const row = page.locator(`[data-testid="online-lobby-room"][data-code="${code}"]`);
+    await expect(row).toHaveAttribute("data-server", "friends", { timeout: 15_000 });
+    await expect(row).toContainText("Aki's room");
+    await expect(row.locator(".sve-hint")).toHaveText(/^friends · /);
+  }
+
+  // The guest types the code: looked for on both servers, found on the second.
+  await guest.getByTestId("online-server-code").fill(code);
+  await guest.getByTestId("online-server-join").click();
+  for (const page of [host, guest]) {
+    await expect(page.getByTestId("online-connected")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("online-via")).toHaveText("the online server (friends)");
+  }
+  // The spectator watches from its lobby: the second server's seats (two).
+  await spectator.locator(`[data-testid="online-lobby-room"][data-code="${code}"]`).getByTestId("online-lobby-watch").click();
+  await expect(spectator.getByTestId("online-watching")).toBeVisible({ timeout: 30_000 });
+  for (const page of [host, guest, spectator]) await expect(page.getByTestId("online-watchers")).toHaveText("Spectators: 1 of 2");
+  await readyBoth(host, guest);
+  await playAtRandom(host, guest, 12, problems, 41);
+  await expectSameInputs(host, guest);
+  expect(problems).toEqual([]);
+});
+
+test("two servers in the configuration: each said and tested, a wrong part said by its place; one that can't be reached", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const page = await openOnline(browser, "");
+  // A late disk read must not overwrite text already pasted into the window.
+  let releaseRead!: () => void;
+  const reading = new Promise<void>((resolve) => { releaseRead = resolve; });
+  await page.route("**/api/online-server", async (route) => { await reading; await route.continue(); });
+  await page.getByTestId("online-server-configure").click();
+  // The same server twice.
+  await page.getByTestId("server-config-text").fill(`${SERVER}\n${FRIENDS}\n[server]\naddress = WS://127.0.0.1:5198/\nkey = e2e-test-key-0001\n`);
+  const readBack = page.waitForResponse("**/api/online-server");
+  releaseRead();
+  await readBack;
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await expect(page.getByTestId("server-config-status")).toHaveText("Server 3: This server is there twice (the same address).");
+  await expect(page.getByTestId("server-config-save")).toBeDisabled();
+  // Each server tested: the second one's key is wrong.
+  await page.getByTestId("server-config-text").fill(`${SERVER}\n${FRIENDS.replace("e2e-test-key-0002", "not-the-key-0002")}`);
+  await expect(page.getByTestId("server-config-status").locator("p")).toHaveText(["Server: e2e (ws://127.0.0.1:5198)", "Server: friends (ws://127.0.0.1:5197)"]);
+  await page.getByTestId("server-config-test").click();
+  await expect(page.getByTestId("server-config-check")).toHaveText([
+    /^e2e: Connected: the server takes this key \(\d+ ms; 3 spectator seats a room\)\.$/,
+    /^friends: Not connected: The server refused this program: its key is wrong/,
+  ]);
+  // A server nobody runs: its part of the lobby says so, the other's rooms are listed.
+  await page.getByTestId("server-config-text").fill(`${SERVER}\n[server]\nname = down\naddress = ws://127.0.0.1:9\nkey = e2e-key-nobody-takes\n`);
+  await page.getByTestId("server-config-save").click();
+  await page.getByTestId("server-config-close").click();
+  await expect(page.getByTestId("online-lobby-problem")).toHaveText(/^down: The lobby can't be shown: Couldn't reach the server/);
+  await expect(page.getByTestId("online-lobby")).not.toHaveAttribute("data-rooms", "-1");
+  // Both right: saved; the online screen and the settings name both.
+  await page.getByTestId("online-server-configure").click();
+  await page.getByTestId("server-config-text").fill(`${SERVER}\n${FRIENDS}`);
+  await page.getByTestId("server-config-save").click();
+  await expect(page.getByTestId("server-config-save")).toBeDisabled();
+  await page.getByTestId("server-config-close").click();
+  await expect(page.getByTestId("online-server").locator("h3")).toHaveText("Use the server (e2e, friends)");
+  await expect(page.getByTestId("online-lobby-problem")).toHaveCount(0);
+  await page.getByTestId("online-back").click();
+  await page.getByTestId("menu-settings").click();
+  await expect(page.getByTestId("settings-server")).toHaveText("e2e, friends");
+});
+
+test("a turn time limit: the host's rule, the clock on the table, the turn ending by itself; the quick windows' options", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const problems: string[] = [];
+  const host = await openOnline(browser, SERVER, { setupTurnOrder: "player1", setupDecks: ["samples/sd01.json", "samples/sd02.json"] });
+  const guest = await openOnline(browser, SERVER, { setupDecks: ["samples/sd03.json", "samples/sd02.json"] });
+  watchProblems([host, guest], problems);
+  // Off at first; on, 600 seconds are offered; the host takes 10 (within 10–3600: 5 becomes 10).
+  await expect(host.getByTestId("online-server-turn-limit")).not.toBeChecked();
+  await expect(host.getByTestId("online-server-turn-limit-seconds")).toHaveCount(0);
+  await host.getByTestId("online-server-turn-limit").check();
+  await expect(host.getByTestId("online-server-turn-limit-seconds")).toHaveValue("600");
+  await host.getByTestId("online-server-turn-limit-seconds").fill("5");
+  await host.getByTestId("online-server-turn-limit-seconds").press("Enter");
+  await expect(host.getByTestId("online-server-turn-limit-seconds")).toHaveValue("10");
+  await host.getByTestId("online-server-host").click();
+  const code = (await host.getByTestId("online-room-code").innerText({ timeout: 30_000 })).trim();
+  await guest.getByTestId("online-server-code").fill(code);
+  await guest.getByTestId("online-server-join").click();
+  await expect(guest.getByTestId("online-rules")).toHaveText("Standard · restriction list: None · first player: Player 1 goes first · turn limit 10 s", { timeout: 30_000 });
+  // In the room the host still has it (and could change it).
+  await expect(host.getByTestId("online-turn-limit")).toBeChecked();
+  await expect(host.getByTestId("online-turn-limit-seconds")).toHaveValue("10");
+  await readyBoth(host, guest);
+
+  // The setup isn't timed: no clock while the hands are kept.
+  await expect(host.locator(".sve-decision")).toHaveAttribute("data-decision", "mulligan", { timeout: 30_000 });
+  await expect(host.getByTestId("center-clock")).toHaveCount(0);
+  await host.getByTestId("table-keep").click();
+  await expect(guest.locator(".sve-decision")).toHaveAttribute("data-decision", "mulligan");
+  await guest.getByTestId("table-keep").click();
+  // Player 1's turn: their time runs, on both tables.
+  for (const page of [host, guest]) {
+    await expect(page.getByTestId("center-clock")).toHaveAttribute("data-player", "0", { timeout: 30_000 });
+    await expect(page.getByTestId("center-clock")).toHaveText(/^Player 1.*: 0:(0\d|10) left$/);
+  }
+  await expect(host.locator(".sve-center-turn")).toContainText("Turn 1");
+  // The last 30 seconds stand out (here, all of them).
+  await expect(host.getByTestId("center-clock")).toHaveClass(/sve-center-clock-low/);
+  // Nobody answers: out of time, player 1's program ends the turn; player 2's turn and time begin.
+  for (const page of [host, guest]) {
+    await expect(page.locator(".sve-center-turn")).toContainText("Turn 2", { timeout: 30_000 });
+    await expect(page.getByTestId("center-clock")).toHaveAttribute("data-player", "1");
+  }
+  expect(await host.locator(".sve-decision").getAttribute("data-inputs")).toBe(await guest.locator(".sve-decision").getAttribute("data-inputs"));
+
+  // A player's quick windows: their own options in the debug tab, off at first, kept in their settings.
+  await host.getByTestId("sidebar-show").click();
+  await host.getByTestId("tab-debug").click();
+  await expect(host.getByTestId("debug-fake-quick")).not.toBeChecked();
+  await expect(host.getByTestId("debug-skip-quick")).not.toBeChecked();
+  await host.getByTestId("debug-skip-quick").check();
+  await expect(host.getByTestId("debug-skip-quick")).toBeChecked();
+  expect(await host.evaluate(() => (JSON.parse(localStorage.getItem("sve-gui-settings") ?? "{}") as { skipQuick?: boolean }).skipQuick)).toBe(true);
+  expect(problems).toEqual([]);
 });

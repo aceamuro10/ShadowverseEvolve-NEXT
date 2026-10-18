@@ -1,3 +1,4 @@
+import { hasCardTexts } from "./helpers";
 import { expect, test } from "@playwright/test";
 import { clickCard, startGame, toMainPhase, useSettings } from "./helpers";
 
@@ -30,7 +31,7 @@ test("runtime details follow maneuver, language changes, expiry and moved instan
   await expect(panel.locator(".sve-details-type")).toContainText("Amulet");
   await expect(stats).toHaveCount(1); // The printed 3/3 must not show while it is an amulet.
   await expect(page.getByTestId("details-state").locator(".sve-details-flags span")).toHaveText(["Entered the field this turn"]);
-  const originalText = await panel.locator(".sve-card-text").innerText();
+  const originalText = hasCardTexts ? await panel.locator(".sve-card-text").innerText() : null;
 
   await vehicle.click();
   const activate = manual.getByRole("button", { name: /^Activate for free:/ }).first();
@@ -38,7 +39,7 @@ test("runtime details follow maneuver, language changes, expiry and moved instan
   await activate.click();
   await expect(panel.locator(".sve-details-type").first()).toContainText("Current: Follower (Original: Amulet)");
   await expect(stats.locator("strong")).toHaveText(["2", "3", "3"]);
-  await expect(panel.locator(".sve-card-text")).toHaveText(originalText, { useInnerText: true });
+  if (originalText !== null) await expect(panel.locator(".sve-card-text")).toHaveText(originalText, { useInnerText: true });
   // Existing ability text remains below the printed card text.
   await expect(page.getByTestId("details-gifts")).toHaveCount(0);
   expect(await panel.evaluate((el) => {

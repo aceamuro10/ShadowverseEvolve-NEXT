@@ -28,6 +28,8 @@ export interface CardRuntimeDetails {
 }
 
 export interface GameUpdate extends EngineUpdate {
+  /** Page receipt time: clocks keep counting while cosmetic playback is queued. */
+  receivedAt?: number;
   /** One-shot public cards entering hidden zones; their display is owned entirely by the page. */
   handGains?: HandGainAnnouncement[];
   /** Computed synchronously from the session and the final visible view being sent. */

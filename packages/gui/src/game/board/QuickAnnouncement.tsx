@@ -1,7 +1,8 @@
 // A Quick card or ability played at quick timing (CR 7.4.5 / 8.4.7) resolves at once: the game then waits until the person
 // at the screen has seen it (the host holds on, GameUpdate.announcement). The window tells who played what, what it selected
 // and what was chosen; the card comes out to its player's corner of the table (the opponent's top right, one's own bottom
-// left) and arrows point at the selected cards still on the table. OK (or Enter / Escape) lets the game go on.
+// left) and arrows point at the selected cards still on the table. OK (or Enter / Escape) lets the game go on, and so do a
+// few seconds without it.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CardId, Decision } from "@sve/core";
 import { cardName } from "../../app/catalog";
@@ -21,6 +22,9 @@ import { useBack } from "../../app/back";
 import { AnnouncementFrame } from "./AnnouncementFrame";
 
 type GameUpdate = EngineUpdate & Pick<PresentationUpdate, "announcementIntroduced">;
+
+/** How long the window waits for OK before the game goes on by itself. */
+const AUTO_OK_MS = 3000;
 
 export function QuickAnnouncement({ update }: { update: GameUpdate }) {
   const announcement = update.announcement;
@@ -63,6 +67,14 @@ function AnnouncementWindow({ update, announcement: a }: { update: GameUpdate; a
       setHighlight([]);
     };
   }, [a, animations]);
+
+  // OK not pressed within a few seconds: as if it were (the host takes one OK per announcement: a later one changes nothing).
+  const watched = update.watch !== null;
+  useEffect(() => {
+    if (watched) return;
+    const timer = window.setTimeout(ok, AUTO_OK_MS);
+    return () => window.clearTimeout(timer);
+  }, [a.seq, watched]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

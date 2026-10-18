@@ -3,11 +3,12 @@ import { createEngine, type Input, type PlayerId } from "@sve/core";
 import { ALL_CARDS, ALL_SCRIPTS } from "@sve/core/sets";
 import { drive, testFollower, type DriveSpec } from "@sve/core/testing";
 import { Catalog } from "../src/app/catalog";
-import { displayAbilityText } from "../src/game/card/ability-display";
+import { contextText } from "./presentation-text";
+import { hasDataTexts, withDataTexts } from "../../../tools/lib/card-texts";
 import { stateHash } from "../src/engine/game-host";
 import { EffectContextObserver } from "../src/presentation/effect-context";
 
-const engine = createEngine({ cards: [...ALL_CARDS, testFollower("PLAIN", 0, 1, 20)], scripts: ALL_SCRIPTS });
+const engine = createEngine({ cards: [...withDataTexts(ALL_CARDS), testFollower("PLAIN", 0, 1, 20)], scripts: ALL_SCRIPTS });
 const catalog = new Catalog(engine.db.all().map((card) => ({ ...card, status: engine.implementationStatus(card.id) })));
 
 function setup(receiver: string, extra: DriveSpec = {}) {
@@ -40,9 +41,10 @@ function setup(receiver: string, extra: DriveSpec = {}) {
 
 function expectText(h: ReturnType<typeof setup>, def: string, index = 0) {
   expect(h.context()).toMatchObject({ sourceDef: def, abilityIndex: index });
+  if (!hasDataTexts()) return; // Texts are local resources in 0.4.2; identity/state checks still run without them.
   for (const lang of ["ja", "cn", "en", "zh-Hant"] as const) {
     const expected = ALL_SCRIPTS[def]!.abilities![index]!;
-    const text = displayAbilityText(h.context()!, catalog, lang);
+    const text = contextText(engine, h.context()!, catalog, lang);
     expect(text, `${def}:${index}:${lang}`).not.toBeNull();
     expect(text!.text).toBeTruthy();
     if (index === 0 && expected.kind !== "spell" && expected.unionBurst) expect(text!.text).toMatch(/UB|ub/);
@@ -133,7 +135,7 @@ describe("free Union Burst target presentation", () => {
     expectText(h, watcher, 1);
     expect(h.context()!.instanceId).not.toBe(inner);
     expect(h.context()!.pendingId).toBeTruthy();
-    expect(displayAbilityText(h.context()!, catalog, "en")!.text).toContain(watcher === "CP04-052" ? "PriConne spell" : "chosen this turn");
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "en")!.text).toContain(watcher === "CP04-052" ? "PriConne spell" : "chosen this turn");
     expect(h.t.decision).toMatchObject(watcher === "CP04-052"
       ? { type: "selectCards", reason: "target", source: h.t.id(watcher) }
       : { type: "choose", reason: "mode", source: h.t.id(watcher) });

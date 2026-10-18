@@ -3,7 +3,8 @@ import { createEngine, script, randomAnswer, seedRng, type Input, type GameSessi
 import { ALL_CARDS, ALL_SCRIPTS } from "@sve/core/sets";
 import { drive, testFollower } from "@sve/core/testing";
 import { Catalog } from "../src/app/catalog";
-import { displayAbilityText } from "../src/game/card/ability-display";
+import { contextText } from "./presentation-text";
+import { hasDataTexts, withDataTexts } from "../../../tools/lib/card-texts";
 import { abilitySource, GRANT_TEXT } from "../src/presentation/ability-source";
 import { EffectContextObserver, observePresentationEngine } from "../src/presentation/effect-context";
 import { createPresentationHost } from "../src/presentation/host";
@@ -23,7 +24,7 @@ const discardActivation = script.activated({ custom: { canPay: (g, p) => g.cards
   *pay(fx) { yield* fx.discard(fx.controller, 1, 1); } } }, {
   *resolve(fx) { yield* fx.choose([{ id: "old-a", label: "Old A" }, { id: "old-b", label: "Old B" }]); },
 });
-const engine = createEngine({ cards: [...ALL_CARDS, flow, testFollower("PLAIN", 0, 1, 8), testFollower("SKIP", 0, 1, 8), testFollower("PRIVATE", 0, 1, 8), testFollower("NESTED", 0, 1, 8),
+const engine = createEngine({ cards: [...withDataTexts(ALL_CARDS), flow, testFollower("PLAIN", 0, 1, 8), testFollower("SKIP", 0, 1, 8), testFollower("PRIVATE", 0, 1, 8), testFollower("NESTED", 0, 1, 8),
   ...["SELF", "ACTIVE", "WATCHER", "CASTER", "DONE"].map((id) => testFollower(id, 0, 1, 8)),
   { ...testFollower("DELAY", 0, 1, 8), text: { en: "{[fanfare]} Set up a delayed ability.\nAt the start of your end phase, choose an option.", ja: null, cn: null } }], scripts: {
   ...ALL_SCRIPTS,
@@ -122,7 +123,7 @@ describe("activated, spell and card play presentation", () => {
     const h = track(t.game);
     mainAction(t, h, "activate", "BP01-T10");
     expect(h.context()).toMatchObject({ sourceDef: "kw:stack", kind: "activated", keyword: "stack", abilityIndex: 0 });
-    expect(displayAbilityText(h.context()!, catalog, "cn")?.text).toContain("【蓄积】");
+    expect(contextText(engine, h.context()!, catalog, "cn")).toBeNull(); // main shows the keyword in the heading.
   });
 
   it.each(["BP01-002", "BP01-004", "BP03-002"])("hands evolve over to %s's on-evolve ability at its first question", (def) => {
@@ -136,7 +137,7 @@ describe("activated, spell and card play presentation", () => {
       h.act({ type: "selectCards", cards: [t.id("PLAIN")] });
     }
     expect(h.context()).toMatchObject({ sourceDef: evolved, kind: "automatic", timing: "onEvolve" });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.text).toMatch(/^【進化時】/);
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.text).toMatch(/^【進化時】/);
   });
 
   it("captures an activated mode before its play event and keeps it through target and cost questions", () => {
@@ -146,7 +147,7 @@ describe("activated, spell and card play presentation", () => {
     expect(events.some((e) => e.type === "abilityPlayed")).toBe(false);
     expect(h.context()).toMatchObject({ kind: "activated", abilityIndex: 1, textRef: { timing: "activated" } });
     const instance = h.context()!.instanceId;
-    expect(displayAbilityText(h.context()!, catalog, "cn")?.text).toContain("【2】");
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "cn")?.text).toContain("【2】");
     h.act({ type: "choose", ids: ["follower"] });
     expect(h.context()).toMatchObject({ instanceId: instance, modeIds: ["follower"] });
     h.act({ type: "selectCards", cards: [t.id("opp:PLAIN")] });
@@ -165,8 +166,8 @@ describe("activated, spell and card play presentation", () => {
     expect(t.decision).toMatchObject({ type: "choose", reason: "playOption" });
     expect(h.context()).toMatchObject({ kind: "spell", sourceDef: "BP21-026", textRef: { timing: "spell" } });
     expect(h.context()?.source).not.toBe(old);
-    expect(displayAbilityText(h.context()!, catalog, "ja")).toMatchObject({ match: "body" });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.text).toContain("コストを+2してよい");
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")).not.toBeNull();
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.text).toContain("コストを+2してよい");
     const original = h.context();
     expect(() => h.act({ type: "choose", ids: ["nonexistent"] })).toThrow();
     expect(h.context()).toEqual(original);
@@ -186,7 +187,7 @@ describe("activated, spell and card play presentation", () => {
     expect(h.context()).toMatchObject({ kind: "spell", playOptionId: "discard" });
     h.act({ type: "selectCards", cards: [t.id("opp:PLAIN")] });
     expect(t.decision).toMatchObject({ type: "selectCards", reason: "pick" });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.text).toContain("手札のゴブリン・カード1枚を捨てる");
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.text).toContain("手札のゴブリン・カード1枚を捨てる");
   });
 
   it("hands a spell's additional discard cost over to a newly started automatic ability", () => {
@@ -223,7 +224,7 @@ describe("activated, spell and card play presentation", () => {
     mainAction(t, h, "play", "BP11-007");
     expect(t.decision).toMatchObject({ type: "selectCards", reason: "pick", min: 4 });
     expect(h.context()).toMatchObject({ kind: "spell", sourceDef: "BP11-007" });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.text).toContain("追加コストとして場の妖精・トークン4体");
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.text).toContain("追加コストとして場の妖精・トークン4体");
   });
 
   it.each([0, 10])("shows a follower's alternate cost with %i PP and hands over to its Fanfare", (playPoints) => {
@@ -238,13 +239,13 @@ describe("activated, spell and card play presentation", () => {
     }
     expect(t.decision).toMatchObject({ type: "selectCards", reason: "pick" });
     expect(h.context()).toMatchObject({ kind: "cardPlay", textRef: { timing: "play" } });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.text).toMatch(/^これをプレイする際、.*元のコストを払うのではなく/);
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.text).toMatch(/^これをプレイする際、.*元のコストを払うのではなく/);
     h.act({ type: "selectCards", cards: [t.id("CP03-084")] });
     expect(t.decision).toMatchObject({ type: "selectCards", reason: "wardEnterEngaged" });
     expect(h.context()).toBeNull();
     h.act({ type: "selectCards", cards: [] });
     expect(h.context()).toMatchObject({ kind: "automatic", sourceDef: "CP03-083", timing: "fanfare" });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.text).toMatch(/^ファンファーレ/);
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.text).toMatch(/^ファンファーレ/);
   });
 });
 
@@ -260,7 +261,7 @@ describe("presentation ability identity and live input observation", () => {
     h.act({ type: "selectPending", id: pending.id });
     expect(h.context()).toMatchObject({ pendingId: pending.id, source: pending.source, abilityIndex: 0 });
     const initial = h.context()!;
-    const text = displayAbilityText(initial, catalog, "cn")!.text;
+    const text = contextText(engine, initial, catalog, "cn")!.text;
     expect(text).toContain("【2】");
     expect(() => h.act({ type: "confirm", yes: true })).toThrow();
     expect(() => h.act({ type: "choose", ids: ["take"] }, 1)).toThrow();
@@ -275,9 +276,9 @@ describe("presentation ability identity and live input observation", () => {
     expect(t.decision).toMatchObject({ type: "selectCards", reason: "discard", player: 1, source: null });
     expect(t.game.state.cards[pending.source]).toBeUndefined();
     expect(h.context()).toMatchObject({ pendingId: pending.id, sourceCard: { def: "FLOW" }, modeIds: ["take"] });
-    expect(displayAbilityText(h.context()!, catalog, "ja")?.lang).toBe("ja");
-    expect(displayAbilityText(h.context()!, catalog, "zh-Hant")?.lang).toBe("zh-Hant");
-    expect(displayAbilityText(h.context()!, catalog, "cn")?.text).toBe(text);
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "ja")?.lang).toBe("ja");
+    if (hasDataTexts()) expect(contextText(engine, h.context()!, catalog, "zh-Hant")?.lang).toBe("zh-Hant");
+    expect(contextText(engine, h.context()!, catalog, "cn")?.text).toBe(text);
     h.act({ type: "selectCards", cards: [t.id("opp:PLAIN@hand")] });
     // The remaining sole pending ability begins automatically; no previous instance can survive this boundary.
     expect(t.decision?.type).toBe("choose");
@@ -378,7 +379,7 @@ describe("presentation ability identity and live input observation", () => {
     const contexts = Object.values(h.presentation().pendingAbilities);
     expect(contexts.find((c) => c.origin === "granted")).toMatchObject({ providerDef: "BP03-011", sourceDef: "grant:followerStrike2" });
     expect(contexts.find((c) => c.origin === "equipment")).toMatchObject({ providerDef: "CP04-T09", sourceDef: "equip:CP04-T09" });
-    for (const context of contexts) expect(displayAbilityText(context, catalog, "cn")?.text).toContain("攻击时");
+    if (hasDataTexts()) for (const context of contexts) expect(contextText(engine, context, catalog, "cn")?.text).toContain("攻击时");
     const equipment = contexts.find((c) => c.origin === "equipment")!;
     h.act({ type: "selectPending", id: equipment.pendingId! });
     expect(h.context()).toMatchObject({ sourceDef: "equip:CP04-T09", providerDef: "CP04-T09" });
@@ -398,7 +399,7 @@ describe("presentation ability identity and live input observation", () => {
     const cemetery = t.game.state.players[0].zones.cemetery.find((id) => t.game.state.cards[id]?.def === base.id)!;
     const left = abilitySource(engine, t.game, pending ?? { controller: 0, source: cemetery, sourceDef: evolved.id, ability: index });
     expect(left.sourceCard?.def).toBe(evolved.id);
-    expect(displayAbilityText(left, catalog, "ja")).not.toBeNull();
+    if (hasDataTexts()) expect(contextText(engine, left, catalog, "ja")).not.toBeNull();
   });
 
   it("keeps a delayed trigger's visible source snapshot across its creation and the source leaving before it triggers", () => {
@@ -411,19 +412,19 @@ describe("presentation ability identity and live input observation", () => {
     h.act({ type: "mainPhase", action: { type: "endMainPhase" } });
     expect(t.decision).toMatchObject({ type: "choose", source: null });
     expect(h.context()).toMatchObject({ source, sourceCard: { def: "DELAY" }, origin: "delayed", abilityIndex: 1 });
-    expect(displayAbilityText(h.context()!, catalog, "en")?.text).toBe("At the start of your end phase, choose an option.");
+    expect(contextText(engine, h.context()!, catalog, "en")?.text).toBe("At the start of your end phase, choose an option.");
   });
 
-  it("locates all reviewed grant quotes and keyword expansions in every language, including fallback after the giver disappears", () => {
+  it("keeps grant and keyword identities while main omits text when no actual giver is known", () => {
     const t = drive(engine, { me: { field: ["PLAIN"] } });
     for (const grant of Object.keys(GRANT_TEXT)) for (const lang of ["ja", "cn", "en", "zh-Hant"] as const) {
       const context = abilitySource(engine, t.game, { controller: 0, source: t.id("PLAIN"), sourceDef: `grant:${grant}`, ability: 0 });
-      expect(displayAbilityText(context, catalog, lang), `${grant}:${lang}`).not.toBeNull();
+      expect(contextText(engine, context, catalog, lang), `${grant}:${lang}`).toBeNull();
       expect(context.providerDef).toBeUndefined(); // A canonical quote is not evidence of the actual giver.
     }
     for (const keyword of ["drain", "singleDrive", "twinDrive"]) {
       const context = abilitySource(engine, t.game, { controller: 0, source: t.id("PLAIN"), sourceDef: `kw:${keyword}`, ability: 0 });
-      expect(displayAbilityText(context, catalog, "ja")?.text).toBeTruthy();
+      expect(contextText(engine, context, catalog, "ja")).toBeNull();
     }
   });
 
