@@ -131,14 +131,13 @@ export function GameScreen({ onMenu, onNewGame, onReplays, onOnline }: Props) {
                 {t(`tab.${key}` as const)}
               </button>
             ))}
+            <button type="button" className={shown === "display" ? "sve-tab-active" : undefined}
+              onClick={() => setTab("display")} data-testid="tab-display" aria-pressed={shown === "display"}
+              title={t("tab.display")} aria-label={t("tab.display")}>
+              G
+            </button>
             <button type="button" className="sve-sidebar-hide" onClick={() => setSidebar(false)} data-testid="sidebar-hide">
               {t("game.hideSidebar")}
-            </button>
-          </nav>
-          <nav className="sve-tabs sve-display-tabs">
-            <button type="button" className={shown === "display" ? "sve-tab-active" : undefined}
-              onClick={() => setTab("display")} data-testid="tab-display" aria-pressed={shown === "display"}>
-              {t("tab.display")}
             </button>
           </nav>
           <section className="sve-tab-body">

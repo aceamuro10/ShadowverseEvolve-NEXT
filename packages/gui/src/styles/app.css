@@ -2107,10 +2107,6 @@ option {
   padding: 6px 8px 0;
 }
 
-.sve-display-tabs > button {
-  width: 100%;
-}
-
 .sve-display-settings {
   display: flex;
   flex-direction: column;
