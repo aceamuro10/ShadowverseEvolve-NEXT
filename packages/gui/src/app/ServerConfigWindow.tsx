@@ -13,7 +13,6 @@ export function ServerConfigWindow({ onClose }: { onClose: () => void }) {
   const t = useT();
   const config = useServerConfig();
   const [text, setText] = useState(config.text);
-  const edited = useRef(false);
   /** Each server's test (in the text's order), while the text stays as it was tested. */
   const [checks, setChecks] = useState<(ServerCheck | "checking")[] | null>(null);
   /** The test under way: an answer to an earlier one (the text changed since) isn't shown. */
@@ -21,11 +20,7 @@ export function ServerConfigWindow({ onClose }: { onClose: () => void }) {
   const [failed, setFailed] = useState<string | null>(null);
   // The text kept (read again: the PC release's file may have been edited by hand meanwhile).
   useEffect(() => {
-    let active = true;
-    void loadServerConfig(true).then((loaded) => {
-      if (active && !edited.current) setText(loaded.text);
-    });
-    return () => { active = false; };
+    void loadServerConfig(true).then((loaded) => setText(loaded.text));
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -61,7 +56,6 @@ export function ServerConfigWindow({ onClose }: { onClose: () => void }) {
     });
   };
   const reset = () => {
-    edited.current = true;
     setFailed(null);
     forget();
     resetServerConfig().then(
@@ -83,7 +77,6 @@ export function ServerConfigWindow({ onClose }: { onClose: () => void }) {
         <textarea
           value={text}
           onChange={(e) => {
-            edited.current = true;
             setText(e.target.value);
             forget();
           }}

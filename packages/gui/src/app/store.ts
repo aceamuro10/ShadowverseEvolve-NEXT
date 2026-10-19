@@ -23,8 +23,6 @@ export interface AppState {
   /** The engine failed to start. */
   startError: string | null;
   catalog: Catalog | null;
-  /** Stable rules/names from the worker. Display-text reloads must not restart deck validation. */
-  rulesCatalog: Catalog | null;
   update: GameUpdate | null;
   log: LogEntry[];
   errors: AppError[];
@@ -35,7 +33,7 @@ export interface AppState {
   handGainExpiresAt: number | null;
 }
 
-let state: AppState = { ready: false, startError: null, catalog: null, rulesCatalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null, handGainExpiresAt: null };
+let state: AppState = { ready: false, startError: null, catalog: null, update: null, log: [], errors: [], authoritative: null, dice: null, diceBusy: false, handGain: null, handGainExpiresAt: null };
 const listeners = new Set<() => void>();
 
 /** The state now, outside React (online play reads how far the game is). */
@@ -109,7 +107,7 @@ engine.subscribe((message) => {
   switch (message.kind) {
     case "ready":
       dataCatalog = message.catalog;
-      setState({ ready: true, catalog: new Catalog(withShownTexts(message.catalog)), rulesCatalog: new Catalog(message.catalog) });
+      setState({ ready: true, catalog: new Catalog(withShownTexts(message.catalog)) });
       break;
     case "update": {
       const update = message.update;

@@ -45,7 +45,7 @@ export function SetupScreen({ onStarted, onBack, onEditDecks }: Props) {
   const t = useT();
   const settings = useSettings();
   const hasGame = useApp((s) => s.update !== null && s.update.result === null);
-  const catalog = useApp((s) => s.rulesCatalog);
+  const catalog = useApp((s) => s.catalog);
   const [decks, setDecks] = useState<DeckFileEntry[] | null>(null);
   const [seed, setSeed] = useState(newSeed);
   const [status, setStatus] = useState<[DeckStatus | null, DeckStatus | null]>([null, null]);

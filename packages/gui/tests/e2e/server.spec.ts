@@ -439,17 +439,9 @@ test("two servers: one lobby lists the rooms of both; a room made on the second 
 test("two servers in the configuration: each said and tested, a wrong part said by its place; one that can't be reached", async ({ browser }) => {
   test.setTimeout(120_000);
   const page = await openOnline(browser, "");
-  // A late disk read must not overwrite text already pasted into the window.
-  let releaseRead!: () => void;
-  const reading = new Promise<void>((resolve) => { releaseRead = resolve; });
-  await page.route("**/api/online-server", async (route) => { await reading; await route.continue(); });
   await page.getByTestId("online-server-configure").click();
   // The same server twice.
   await page.getByTestId("server-config-text").fill(`${SERVER}\n${FRIENDS}\n[server]\naddress = WS://127.0.0.1:5198/\nkey = e2e-test-key-0001\n`);
-  const readBack = page.waitForResponse("**/api/online-server");
-  releaseRead();
-  await readBack;
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   await expect(page.getByTestId("server-config-status")).toHaveText("Server 3: This server is there twice (the same address).");
   await expect(page.getByTestId("server-config-save")).toBeDisabled();
   // Each server tested: the second one's key is wrong.
