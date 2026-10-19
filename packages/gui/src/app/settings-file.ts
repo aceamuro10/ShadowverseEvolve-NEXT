@@ -38,7 +38,7 @@ function whole(value: string, min: number, max: number): number | null {
 
 const percent = (fraction: number): string => String(Math.round(fraction * 100));
 
-const flag = (field: "animations" | "showPlayCosts" | "showDetailTags" | "showCardMoveNotices" | "announceQuick" | "manualSlots" | "manualDebug" | "shareGames" | "chatNotice") => ({
+const flag = (field: "animations" | "showPlayCosts" | "showDetailTags" | "showTurnOrderLabels" | "showCardMoveNotices" | "announceQuick" | "manualSlots" | "manualDebug" | "shareGames" | "chatNotice") => ({
   values: "true, false",
   get: (s: Settings) => String(s[field]),
   set: (_: Settings, v: string) => {
@@ -104,6 +104,7 @@ const ENTRIES: readonly Entry[] = [
   { section: "appearance", key: "animations", field: "animations", label: "debug.animations", ...flag("animations") },
   { section: "gui", key: "card_play_costs", field: "showPlayCosts", label: "display.playCosts", ...flag("showPlayCosts") },
   { section: "gui", key: "detail_tags", field: "showDetailTags", label: "display.detailTags", ...flag("showDetailTags") },
+  { section: "gui", key: "turn_order_labels", field: "showTurnOrderLabels", label: "display.turnOrder", ...flag("showTurnOrderLabels") },
   { section: "gui", key: "card_move_notices", field: "showCardMoveNotices", label: "display.cardMoves", ...flag("showCardMoveNotices") },
   { section: "sound", key: "music", field: "bgmVolume", label: "settings.bgmVolume", ...volume("bgmVolume") },
   { section: "sound", key: "effects", field: "volume", label: "settings.sfxVolume", ...volume("volume") },

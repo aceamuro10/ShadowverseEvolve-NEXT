@@ -24,6 +24,8 @@ export interface Settings {
   showPlayCosts: boolean;
   /** Extra runtime status tags in the card details. */
   showDetailTags: boolean;
+  /** Persistent first/second labels beside both players' information. */
+  showTurnOrderLabels: boolean;
   /** Nonblocking panels for searches, recoveries and returns to the deck. */
   showCardMoveNotices: boolean;
   /** The last game setup (deck files, who plays each seat). */
@@ -92,6 +94,7 @@ export const DEFAULT_SETTINGS: Settings = {
   animations: true,
   showPlayCosts: true,
   showDetailTags: true,
+  showTurnOrderLabels: true,
   showCardMoveNotices: true,
   setupDecks: ["samples/sd01.json", "samples/sd02.json"],
   setupControllers: ["human", "medium"],

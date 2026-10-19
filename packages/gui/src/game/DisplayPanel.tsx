@@ -4,6 +4,7 @@ import { useT } from "../i18n";
 const OPTIONS = [
   { field: "showPlayCosts", label: "display.playCosts", help: "display.playCostsHelp", id: "play-costs" },
   { field: "showDetailTags", label: "display.detailTags", help: "display.detailTagsHelp", id: "detail-tags" },
+  { field: "showTurnOrderLabels", label: "display.turnOrder", help: "display.turnOrderHelp", id: "turn-order" },
   { field: "showCardMoveNotices", label: "display.cardMoves", help: "display.cardMovesHelp", id: "card-moves" },
 ] as const;
 

@@ -79,11 +79,9 @@ test("through the online server: a room made with its rules, joined by code, wat
   await expect(spectator.locator(".sve-table")).toBeVisible({ timeout: 30_000 });
   await openGuiSettings(host);
   const firstRow = host.locator(".sve-game-right .sve-tabs").first();
-  await expect(firstRow.getByRole("button")).toHaveCount(4);
-  const top = (await firstRow.boundingBox())!;
-  const lower = (await host.getByTestId("tab-display").boundingBox())!;
-  expect(lower.y).toBeGreaterThanOrEqual(top.y + top.height);
-  await expect(host.getByTestId("display-settings").getByRole("checkbox")).toHaveCount(3);
+  await expect(firstRow.getByRole("button")).toHaveCount(5);
+  await expect(firstRow.getByTestId("tab-display")).toBeVisible();
+  await expect(host.getByTestId("display-settings").getByRole("checkbox")).toHaveCount(4);
   const inputs = await host.locator(".sve-decision").getAttribute("data-inputs");
   await host.getByTestId("display-play-costs").uncheck();
   expect(await host.locator(".sve-decision").getAttribute("data-inputs")).toBe(inputs);

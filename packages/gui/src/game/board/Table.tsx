@@ -317,6 +317,7 @@ function HandStrip({ update, side, opponent, marks, layout }: { update: GameUpda
 /** Beside a mat: who plays it, leader defense, play points, evolution points, hand and deck sizes, the trigger zone. */
 function PlayerPanel({ update, side, opponent, marks }: { update: GameUpdate; side: PlayerSideView; opponent: boolean; marks: Map<CardId, CardMark> }) {
   const t = useT();
+  const { showTurnOrderLabels } = useSettings();
   const catalog = useApp((s) => s.catalog);
   const active = update.view.activePlayer === side.id && update.view.phase !== "over";
   // What the deck is built on: its universe (CR 6.1.1.5.2), else, in a format, its leaders' classes (Cross Craft: two).
@@ -343,7 +344,7 @@ function PlayerPanel({ update, side, opponent, marks }: { update: GameUpdate; si
         {playerLabel(side.id, update, t)}
         {you ? ` · ${t("game.you")}` : ""}
       </div>
-      {update.view.firstPlayer !== null ? (
+      {showTurnOrderLabels && update.view.firstPlayer !== null ? (
         <div className="sve-player-order" data-testid={`player-order-${side.id}`}>
           {t(update.view.firstPlayer === side.id ? "game.firstPlayer" : "game.secondPlayer")}
         </div>

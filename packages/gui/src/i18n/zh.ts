@@ -375,6 +375,8 @@ export const zh: Record<MessageKey, string> = {
   "display.playCostsHelp": "在手牌及双方公开EX区的卡面上显示实际使用所需的PP。关闭后显示卡牌自身消费；详情中的费用对照仍会保留。",
   "display.detailTags": "详情辅助标签",
   "display.detailTagsHelp": "显示本回合入场、无法攻击、无法攻击主战者、无法造成伤害等额外状态标签。",
+  "display.turnOrder": "常驻先后手标识",
+  "display.turnOrderHelp": "在双方玩家信息旁常驻显示先手、后手标识。开局时的先后手提示仍照常显示。",
   "display.cardMoves": "卡牌移动结果提示",
   "display.cardMovesHelp": "显示检索、回收和返回牌堆的结果面板。卡牌动画由原有的动画开关控制。",
   "display.saved": "设置立即生效并自动保存。",

@@ -371,6 +371,8 @@ export const en = {
   "display.playCostsHelp": "Show the PP needed to play visible cards in hands and either EX area. Turn off to show the card's own cost; the details keep the cost comparison.",
   "display.detailTags": "Extra status tags in card details",
   "display.detailTagsHelp": "Show tags for entering the field this turn and restrictions on attacking or dealing damage.",
+  "display.turnOrder": "Persistent turn order labels",
+  "display.turnOrderHelp": "Show First and Second beside both players' information. The notice at the start of the game still appears.",
   "display.cardMoves": "Card movement result panels",
   "display.cardMovesHelp": "Show panels for searches, recoveries and cards returned to the deck. Card animations use the existing animation setting.",
   "display.saved": "Changes take effect immediately and are saved automatically.",

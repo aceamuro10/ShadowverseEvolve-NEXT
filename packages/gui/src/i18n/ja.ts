@@ -375,6 +375,8 @@ export const ja: Record<MessageKey, string> = {
   "display.playCostsHelp": "手札と双方のEXエリアの公開カードに、いまプレイするためのPPを表示します。オフではカード自体のコストを表示し、詳細のコスト比較は残ります。",
   "display.detailTags": "カード詳細の補助状態タグ",
   "display.detailTagsHelp": "このターンに場に出たことや、攻撃・リーダーへの攻撃・ダメージの制限を表示します。",
+  "display.turnOrder": "先攻・後攻の常時表示",
+  "display.turnOrderHelp": "両プレイヤーの情報欄に先攻・後攻を常時表示します。対戦開始時の案内は引き続き表示されます。",
   "display.cardMoves": "カード移動の結果通知",
   "display.cardMovesHelp": "サーチ・回収・デッキに戻るカードの結果パネルを表示します。カードのアニメーションは既存の設定に従います。",
   "display.saved": "変更はすぐに反映され、自動的に保存されます。",

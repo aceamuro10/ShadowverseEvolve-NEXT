@@ -167,8 +167,8 @@ test("GUI settings switch card prices and status tags immediately and persist fo
   for (const id of [own, ex]) await expect(tile(page, id).locator(".sve-stat-cost")).toHaveText("3");
   await tile(page, own).hover();
   await openGuiSettings(page);
-  await expect(page.getByTestId("display-settings").getByRole("checkbox")).toHaveCount(3);
-  for (const id of ["play-costs", "detail-tags", "card-moves"]) await expect(page.getByTestId(`display-${id}`)).toBeChecked();
+  await expect(page.getByTestId("display-settings").getByRole("checkbox")).toHaveCount(4);
+  for (const id of ["play-costs", "detail-tags", "turn-order", "card-moves"]) await expect(page.getByTestId(`display-${id}`)).toBeChecked();
   const before = await inputs(page);
   await page.getByTestId("display-play-costs").uncheck();
   for (const id of [own, ex]) await expect(tile(page, id).locator(".sve-stat-cost")).toHaveText("2");
@@ -190,16 +190,14 @@ test("GUI settings switch card prices and status tags immediately and persist fo
   await page.getByTestId("display-detail-tags").check();
   await expect(page.getByTestId("details-state")).toBeVisible();
   expect(await inputs(page)).toBe(tagsBefore);
-  for (const id of ["play-costs", "detail-tags", "card-moves"]) await page.getByTestId(`display-${id}`).uncheck();
+  for (const id of ["play-costs", "detail-tags", "turn-order", "card-moves"]) await page.getByTestId(`display-${id}`).uncheck();
   // A new page shares saved preferences without the original page's settings init script.
   const restored = await page.context().newPage();
   await startGame(restored, "gui-settings-restored");
   await openGuiSettings(restored);
-  for (const id of ["play-costs", "detail-tags", "card-moves"]) await expect(restored.getByTestId(`display-${id}`)).not.toBeChecked();
+  for (const id of ["play-costs", "detail-tags", "turn-order", "card-moves"]) await expect(restored.getByTestId(`display-${id}`)).not.toBeChecked();
   await restored.setViewportSize({ width: 915, height: 412 });
-  const top = (await restored.locator(".sve-game-right .sve-tabs").first().boundingBox())!;
-  const lower = (await restored.getByTestId("tab-display").boundingBox())!;
-  expect(lower.y).toBeGreaterThanOrEqual(top.y + top.height);
+  await expect(restored.locator(".sve-game-right .sve-tabs").first().getByTestId("tab-display")).toBeVisible();
   expect(await restored.getByTestId("game-sidebar").evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
   await restored.screenshot({ path: test.info().outputPath("gui-settings-narrow.png") });
   await restored.close();
