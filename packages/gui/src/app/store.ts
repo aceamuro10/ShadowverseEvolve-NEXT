@@ -8,7 +8,7 @@ import { cardTextProblems, onCardTexts, withShownTexts } from "../resources/card
 import type { GameUpdate, HandGainAnnouncement } from "../presentation/protocol";
 import { playUpdateSounds } from "../resources/sound";
 import { Catalog } from "./catalog";
-import { getSettings } from "./settings";
+import { getSettings, subscribeSettings } from "./settings";
 import { DicePlayback, type DiceFrame } from "../presentation/dice-playback";
 import { tableAnimations } from "../presentation/animation-barrier";
 import { HandGainDisplay } from "../presentation/hand-gain-display";
@@ -49,6 +49,9 @@ function setState(change: Partial<AppState>): void {
 /** The engine worker (one for the whole app). */
 export const engine = new EngineClient();
 const handGains: HandGainDisplay = new HandGainDisplay((handGain) => setState({ handGain, handGainExpiresAt: handGains.expiresAt }));
+subscribeSettings((settings) => {
+  if (!settings.showCardMoveNotices && state.handGain) handGains.clear();
+});
 
 /** Dismiss only the notice that was clicked; no worker or online acknowledgement is needed. */
 export function dismissHandGain(key: string): void {
@@ -72,8 +75,9 @@ function publishUpdate(update: GameUpdate, interactive: boolean, appendLog = tru
   for (const fn of beforeUpdate) fn(update);
   playUpdateSounds({ ...update, log: update.animationLog ?? update.log }, state.update?.view ?? null, state.catalog, state.update?.announcement?.seq ?? null);
   const allowed = interactive && update === state.authoritative;
+  const handGain = appendLog && getSettings().showCardMoveNotices ? handGains.publish(update) : null;
   setState({ update: allowed ? update : { ...update, decision: null, manual: null, announcement: null, looked: null },
-    ...(appendLog ? { handGain: handGains.publish(update), handGainExpiresAt: handGains.expiresAt } : {}),
+    ...(appendLog ? { handGain, handGainExpiresAt: handGains.expiresAt } : {}),
     log: appendLog ? update.logReset ? update.log : [...state.log, ...update.log] : state.log, diceBusy: !allowed });
 }
 

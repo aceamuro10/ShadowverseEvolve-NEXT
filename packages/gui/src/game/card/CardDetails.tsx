@@ -50,7 +50,7 @@ export function CardDetails() {
 export function CardPanel({ focus, details, exact = false, art = true, onToken }: { focus: FocusCard; details?: CardRuntimeDetails; exact?: boolean; art?: boolean; onToken?: (def: string) => void }) {
   const catalog = useApp((s) => s.catalog)!;
   const update = useApp((s) => s.update);
-  const { cardLang, uiLang, tokenArt } = useSettings();
+  const { cardLang, uiLang, tokenArt, showDetailTags } = useSettings();
   const t = useT();
   const [viewing, setViewing] = useState<readonly ArtFace[] | null>(null);
   const def = catalog.def(focus.def);
@@ -170,7 +170,7 @@ export function CardPanel({ focus, details, exact = false, art = true, onToken }
           </div>
         </div>
       ) : null}
-      {view && details && (details.enteredFieldThisTurn || details.cannotAttack || details.cannotAttackLeader || details.cannotDealDamage) ? (
+      {showDetailTags && view && details && (details.enteredFieldThisTurn || details.cannotAttack || details.cannotAttackLeader || details.cannotDealDamage) ? (
         <section className="sve-details-current-state" data-testid="details-state" aria-label={t("card.currentState")}>
           <div className="sve-details-flags">
             {details.enteredFieldThisTurn ? <span>{t("card.enteredThisTurn")}</span> : null}

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readSettingsText, writeSettingsText } from "../host/settings-file";
-import { DEFAULT_SETTINGS, type Settings } from "../src/app/settings";
+import { DEFAULT_SETTINGS, migrateSettings, type Settings } from "../src/app/settings";
 import { FILE_FIELDS, newSettingsFile, readSettingsFile, updateSettingsFile } from "../src/app/settings-file";
 
 // The PC release's settings.ini: the settings page's settings (and a few of the debug panel's) as a file a person edits by
@@ -15,6 +15,9 @@ const mine: Settings = {
   cardLang: "cn",
   uiTransparency: 0.25,
   animations: false,
+  showPlayCosts: false,
+  showDetailTags: false,
+  showCardMoveNotices: false,
   volume: 0.35,
   bgmVolume: 0,
   announceQuick: false,
@@ -44,7 +47,11 @@ describe("settings.ini", () => {
     expect(text).toContain("turn_password = p;w=1\n");
     const { settings, present, ignored } = readSettingsFile(text, DEFAULT_SETTINGS);
     expect(ignored).toEqual([]);
-    expect(present.size).toBe(16);
+    expect(present.size).toBe(19);
+    expect(text).toContain("[gui]\n; GUI优化设置 / GUI最適化設定 / GUI enhancement settings\n");
+    expect(text).toContain("card_play_costs = false\n");
+    expect(text).toContain("detail_tags = false\n");
+    expect(text).toContain("card_move_notices = false\n");
     expect(text).toContain("player_name = 小明\n");
     expect(text).toContain("share_games = false\n");
     expect(text).toContain("chat_notice = true\n");
@@ -77,7 +84,7 @@ describe("settings.ini", () => {
     expect(settings).toMatchObject({ uiLang: "ja", cardLang: "cn", bgmVolume: 1, volume: DEFAULT_SETTINGS.volume, announceQuick: false, botDelayMs: 450, manualDebug: true });
     expect(settings.turn).toEqual({ urls: "", username: "a b", credential: "" });
     // Not in the file: the defaults, not what the browser had.
-    expect(settings).toMatchObject({ uiTransparency: null, animations: true, manualSlots: false });
+    expect(settings).toMatchObject({ uiTransparency: null, animations: true, manualSlots: false, showPlayCosts: true, showDetailTags: true, showCardMoveNotices: true });
     expect(ignored).toEqual(["effects = loud", "turn_urls", "colour = red"]);
     expect([...present].sort()).toEqual(["debug.manual_debug", "game.bot_delay", "game.quick_announcement", "language.cards", "language.interface", "online.turn_username", "sound.music"]);
     expect(readSettingsFile("[appearance]\ntransparency =\n", mine).settings.uiTransparency).toBeNull();
@@ -108,6 +115,17 @@ describe("settings.ini", () => {
     ]);
     // Nothing asked: the same text.
     expect(updateSettingsFile(text, mine, [])).toBe(text);
+  });
+
+  it("keeps enhancements enabled for old preferences and remembers explicit choices", () => {
+    const defaults = { showPlayCosts: true, showDetailTags: true, showCardMoveNotices: true };
+    expect(migrateSettings({ uiLang: "zh" })).toMatchObject(defaults);
+    const choices = { showPlayCosts: false, showDetailTags: true, showCardMoveNotices: false };
+    expect(migrateSettings(choices)).toMatchObject(choices);
+    const old = "; keep this note\n[appearance]\nanimations = false\n";
+    const text = updateSettingsFile(old, { ...DEFAULT_SETTINGS, ...choices }, ["gui.card_play_costs", "gui.detail_tags", "gui.card_move_notices"]);
+    expect(text.startsWith(old)).toBe(true);
+    expect(readSettingsFile(text, DEFAULT_SETTINGS).settings).toMatchObject({ ...choices, animations: false });
   });
 
   it("is kept on disk for Windows' Notepad: UTF-8 with a BOM, CRLF line ends", () => {

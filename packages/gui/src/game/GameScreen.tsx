@@ -15,11 +15,12 @@ import { CardDetails } from "./card/CardDetails";
 import { setDetailsOpen, useDetailsOpen } from "./details";
 import { installLongPress } from "./long-press";
 import { DebugPanel } from "./debug/DebugPanel";
+import { DisplayPanel } from "./DisplayPanel";
 import { LogPanel } from "./log/LogPanel";
 import { QuickChat } from "./QuickChat";
 import { WatchBar } from "./watch/WatchBar";
 
-type Tab = "log" | "debug" | "chat";
+type Tab = "log" | "debug" | "chat" | "display";
 
 interface Props {
   onMenu: () => void;
@@ -79,7 +80,7 @@ export function GameScreen({ onMenu, onNewGame, onReplays, onOnline }: Props) {
     if (seat !== null && window.confirm(t("game.concedeConfirm"))) engine.send({ kind: "concede", seat });
   };
   const tabs: Tab[] = online ? ["log", "chat", "debug"] : ["log", "debug"];
-  const shown = tabs.includes(tab) ? tab : "log";
+  const shown = tab === "display" || tabs.includes(tab) ? tab : "log";
   return (
     <div className={`sve-game${compact ? " sve-game-compact" : ""}`} ref={gameRef}>
       {compact && !drawer ? (
@@ -134,8 +135,14 @@ export function GameScreen({ onMenu, onNewGame, onReplays, onOnline }: Props) {
               {t("game.hideSidebar")}
             </button>
           </nav>
+          <nav className="sve-tabs sve-display-tabs">
+            <button type="button" className={shown === "display" ? "sve-tab-active" : undefined}
+              onClick={() => setTab("display")} data-testid="tab-display" aria-pressed={shown === "display"}>
+              {t("tab.display")}
+            </button>
+          </nav>
           <section className="sve-tab-body">
-            {shown === "log" ? <LogPanel update={update} /> : shown === "chat" ? <Chat /> : <DebugPanel update={update} />}
+            {shown === "log" ? <LogPanel update={update} /> : shown === "chat" ? <Chat /> : shown === "display" ? <DisplayPanel /> : <DebugPanel update={update} />}
           </section>
         </aside>
       ) : null}

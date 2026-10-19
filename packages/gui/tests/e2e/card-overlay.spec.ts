@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { Keyword, ManualOp } from "@sve/core";
-import { startGame, toMainPhase, useSettings } from "./helpers";
+import { openGuiSettings, startGame, toMainPhase, useSettings } from "./helpers";
 
 async function boot(page: Page) {
   await page.route("**/api/decks/samples/sd01.json", route => route.fulfill({ json: {
@@ -156,6 +156,53 @@ test("the opponent's public EX costs refresh on the table, in the browser and in
   await expect(tile(page, ex).locator(".sve-stat-cost")).toHaveText("2");
   await expect(preview).toHaveText("2");
   await expect(page.getByTestId("details-play-cost")).toHaveCount(0);
+});
+
+test("GUI settings switch card prices and status tags immediately and persist for the next page", async ({ page }) => {
+  await boot(page);
+  const own = await getCard(page, "BP13-060");
+  await manual(page, { kind: "move", card: await getCard(page, "BP13-060", 1), to: "ex" });
+  const ex = await cardId(page, "BP13-060", "ex", 1);
+  for (const player of [0, 1]) await manual(page, { kind: "move", card: await getCard(page, "BP05-070", player), to: "field" });
+  for (const id of [own, ex]) await expect(tile(page, id).locator(".sve-stat-cost")).toHaveText("3");
+  await tile(page, own).hover();
+  await openGuiSettings(page);
+  await expect(page.getByTestId("display-settings").getByRole("checkbox")).toHaveCount(3);
+  for (const id of ["play-costs", "detail-tags", "card-moves"]) await expect(page.getByTestId(`display-${id}`)).toBeChecked();
+  const before = await inputs(page);
+  await page.getByTestId("display-play-costs").uncheck();
+  for (const id of [own, ex]) await expect(tile(page, id).locator(".sve-stat-cost")).toHaveText("2");
+  await expect(page.getByTestId("details-play-cost").locator("strong")).toHaveText("3");
+  expect(await inputs(page)).toBe(before);
+  await openZone(page, "ex", 1);
+  await expect(page.locator(`.sve-modal .sve-card[data-card="${ex}"] .sve-stat-cost`)).toHaveText("2");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("display-play-costs").check();
+  for (const id of [own, ex]) await expect(tile(page, id).locator(".sve-stat-cost")).toHaveText("3");
+  await page.locator(".sve-sidebar-hide").click();
+  await manual(page, { kind: "move", card: await getCard(page, "BP01-001"), to: "field" });
+  await tile(page, await cardId(page, "BP01-001", "field")).hover();
+  await expect(page.getByTestId("details-state")).toBeVisible();
+  await openGuiSettings(page);
+  const tagsBefore = await inputs(page);
+  await page.getByTestId("display-detail-tags").uncheck();
+  await expect(page.getByTestId("details-state")).toHaveCount(0);
+  await page.getByTestId("display-detail-tags").check();
+  await expect(page.getByTestId("details-state")).toBeVisible();
+  expect(await inputs(page)).toBe(tagsBefore);
+  for (const id of ["play-costs", "detail-tags", "card-moves"]) await page.getByTestId(`display-${id}`).uncheck();
+  // A new page shares saved preferences without the original page's settings init script.
+  const restored = await page.context().newPage();
+  await startGame(restored, "gui-settings-restored");
+  await openGuiSettings(restored);
+  for (const id of ["play-costs", "detail-tags", "card-moves"]) await expect(restored.getByTestId(`display-${id}`)).not.toBeChecked();
+  await restored.setViewportSize({ width: 915, height: 412 });
+  const top = (await restored.locator(".sve-game-right .sve-tabs").first().boundingBox())!;
+  const lower = (await restored.getByTestId("tab-display").boundingBox())!;
+  expect(lower.y).toBeGreaterThanOrEqual(top.y + top.height);
+  expect(await restored.getByTestId("game-sidebar").evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await restored.screenshot({ path: test.info().outputPath("gui-settings-narrow.png") });
+  await restored.close();
 });
 
 test("BP14-046 previews all shared-group members and refreshes the others after one normal play", async ({ page }) => {

@@ -46,7 +46,7 @@ const MAX_KEYWORDS = 3;
 export function CardTile({ card, info, cardId, side, size = "normal", mark = null, onClick, onPointerDown, className, style, children, evolveBack = false, exact = false }: Props) {
   const catalog = useApp((s) => s.catalog);
   const update = useApp((s) => s.update);
-  const { cardLang, uiLang } = useSettings();
+  const { cardLang, uiLang, showPlayCosts } = useSettings();
   const t = useT();
   const id = card && !card.hidden ? card.id : null;
   const highlighted = useFocusSelect((f) => (id !== null ? f.highlight.includes(id) : false));
@@ -76,7 +76,7 @@ export function CardTile({ card, info, cardId, side, size = "normal", mark = nul
   if (mark) classes.push(`sve-card-${mark}`);
   if (highlighted) classes.push("sve-card-highlight");
   if (onClick) classes.push("sve-card-clickable");
-  const cost = normalPlayCost(update, view) ?? (view ? view.cost : (def?.cost ?? null));
+  const cost = (showPlayCosts ? normalPlayCost(update, view) : undefined) ?? (view ? view.cost : (def?.cost ?? null));
   const attack = view ? view.attack : (def?.attack ?? null);
   const defense = view ? view.defense : (def?.defense ?? null);
   const compare = (now: number | null, printed: number | null | undefined) =>

@@ -20,6 +20,12 @@ export interface Settings {
   bgmVolume: number;
   /** The table's animations (cards flying, numbers, ...). */
   animations: boolean;
+  /** Actual normal play PP on visible hand/EX card faces; the details' cost comparison stays available. */
+  showPlayCosts: boolean;
+  /** Extra runtime status tags in the card details. */
+  showDetailTags: boolean;
+  /** Nonblocking panels for searches, recoveries and returns to the deck. */
+  showCardMoveNotices: boolean;
   /** The last game setup (deck files, who plays each seat). */
   setupDecks: [string, string];
   setupControllers: [SeatController, SeatController];
@@ -84,6 +90,9 @@ export const DEFAULT_SETTINGS: Settings = {
   volume: 0.6,
   bgmVolume: 0.4,
   animations: true,
+  showPlayCosts: true,
+  showDetailTags: true,
+  showCardMoveNotices: true,
   setupDecks: ["samples/sd01.json", "samples/sd02.json"],
   setupControllers: ["human", "medium"],
   setupTurnOrder: "choose",

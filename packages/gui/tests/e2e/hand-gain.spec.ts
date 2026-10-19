@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { startGame, toMainPhase, useSettings } from "./helpers";
+import { openGuiSettings, startGame, toMainPhase, useSettings } from "./helpers";
 
 async function prepare(page: Page, extraMain: string[] = []) {
   await useSettings(page, { uiLang: "en", cardLang: "en", animations: false, bgm: false, manualDebug: true, manualSlots: false,
@@ -119,4 +119,40 @@ test("public deck returns use the nonmodal panel; evolve resets leave its notice
   await expect(notice).toHaveCount(0);
   await expect(page.getByTestId("table-end")).toBeEnabled();
   expect(errors).toEqual([]);
+});
+
+test("one GUI switch suppresses searches and deck returns, closes the current notice and never reopens old results", async ({ page }) => {
+  await prepare(page, ["BP03-030", "BP03-030"]);
+  await page.clock.install();
+  await openGuiSettings(page);
+  const toggle = page.getByTestId("display-card-moves");
+  const notice = page.getByTestId("hand-gain");
+  await toggle.uncheck();
+  await manual(page, "search", "BP02-031");
+  await manual(page, "field", "BP02-031");
+  await manual(page, "evolve", "BP02-031", 1);
+  await pick(page, 2);
+  await expect(page.locator(".sve-decision")).toHaveAttribute("data-decision", "mainPhase");
+  await expect(notice).toHaveCount(0);
+  await toggle.check();
+  await expect(notice).toHaveCount(0);
+  // Leave only the deck-return mode available when playing Kiss of the Princess below.
+  await manual(page, "cemetery", "BP02-031");
+  for (const enabled of [false, true]) {
+    await toggle.setChecked(enabled);
+    for (let i = 0; i < 2; i++) {
+      await manual(page, "search", "BP01-038");
+      await manual(page, "cemetery", "BP01-038");
+    }
+    await manual(page, "search", "BP03-030");
+    await manual(page, "play", "BP03-030", 1);
+    await pick(page, 2);
+    await expect(page.locator(".sve-decision")).toHaveAttribute("data-decision", "mainPhase");
+    if (enabled) await expect(notice).toHaveAttribute("data-to", "deck");
+    else await expect(notice).toHaveCount(0);
+  }
+  await toggle.uncheck();
+  await expect(notice).toHaveCount(0);
+  await toggle.check();
+  await expect(notice).toHaveCount(0);
 });

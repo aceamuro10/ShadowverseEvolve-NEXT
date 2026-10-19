@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, gunzipSync } from "node:zlib";
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { useSettings } from "./helpers";
+import { openGuiSettings, useSettings } from "./helpers";
 import { expectSameInputs, playAtRandom, readyBoth, watchProblems } from "./online-helpers";
 
 // Online play through the online server ("use the server"): the server's relay runs on this machine for the tests
@@ -77,6 +77,18 @@ test("through the online server: a room made with its rules, joined by code, wat
 
   await readyBoth(host, guest);
   await expect(spectator.locator(".sve-table")).toBeVisible({ timeout: 30_000 });
+  await openGuiSettings(host);
+  const firstRow = host.locator(".sve-game-right .sve-tabs").first();
+  await expect(firstRow.getByRole("button")).toHaveCount(4);
+  const top = (await firstRow.boundingBox())!;
+  const lower = (await host.getByTestId("tab-display").boundingBox())!;
+  expect(lower.y).toBeGreaterThanOrEqual(top.y + top.height);
+  await expect(host.getByTestId("display-settings").getByRole("checkbox")).toHaveCount(3);
+  const inputs = await host.locator(".sve-decision").getAttribute("data-inputs");
+  await host.getByTestId("display-play-costs").uncheck();
+  expect(await host.locator(".sve-decision").getAttribute("data-inputs")).toBe(inputs);
+  await host.screenshot({ path: test.info().outputPath("gui-settings-online.png") });
+  await host.locator(".sve-sidebar-hide").click();
   await playAtRandom(host, guest, 40, problems, 11);
   await expectSameInputs(host, guest);
   await expect

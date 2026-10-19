@@ -46,6 +46,13 @@ export async function showSidebar(page: Page): Promise<void> {
   await expect(page.getByTestId("game-sidebar")).toBeVisible();
 }
 
+/** Local GUI preferences in the sidebar's separate second row. */
+export async function openGuiSettings(page: Page): Promise<void> {
+  await showSidebar(page);
+  await page.getByTestId("tab-display").click();
+  await expect(page.getByTestId("display-settings")).toBeVisible();
+}
+
 /**
  * Click a card on the table on its left side, halfway down: the cards of a hand overlap to the right and lean a little
  * (their corners stick out of the box a click is measured from), and the card under the pointer rises.
