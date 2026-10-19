@@ -136,6 +136,28 @@ test("costs follow normal taxes and next-card consumption across table, browser,
   expect(errors).toEqual([]);
 });
 
+test("the opponent's public EX costs refresh on the table, in the browser and in details", async ({ page }) => {
+  await boot(page);
+  const source = await getCard(page, "BP13-060", 1);
+  await manual(page, { kind: "move", card: source, to: "ex" });
+  const ex = await cardId(page, "BP13-060", "ex", 1);
+  await tile(page, ex).hover();
+  await expect(tile(page, ex).locator(".sve-stat-cost")).toHaveText("2");
+  await expect(page.getByTestId("details-play-cost")).toHaveCount(0);
+  const tax = await getCard(page, "BP05-070");
+  await manual(page, { kind: "move", card: tax, to: "field" });
+  await expect(tile(page, ex).locator(".sve-stat-cost")).toHaveText("3");
+  await expect(page.getByTestId("details-play-cost").locator("strong")).toHaveText("3");
+  await expect(page.getByTestId("details-cost").locator("strong")).toHaveText("2");
+  await openZone(page, "ex", 1);
+  const preview = page.locator(`.sve-modal .sve-card[data-card="${ex}"] .sve-stat-cost`);
+  await expect(preview).toHaveText("3");
+  await manual(page, { kind: "move", card: await cardId(page, "BP05-070", "field"), to: "cemetery" });
+  await expect(tile(page, ex).locator(".sve-stat-cost")).toHaveText("2");
+  await expect(preview).toHaveText("2");
+  await expect(page.getByTestId("details-play-cost")).toHaveCount(0);
+});
+
 test("BP14-046 previews all shared-group members and refreshes the others after one normal play", async ({ page }) => {
   await boot(page);
   const spell = await getCard(page, "BP14-046");

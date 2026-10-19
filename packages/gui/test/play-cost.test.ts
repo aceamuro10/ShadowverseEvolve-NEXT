@@ -6,6 +6,7 @@ import { cardRuntimeDetails } from "../src/presentation/card-details";
 import { createPlayCostQuery } from "../src/presentation/play-cost";
 import { withoutMemory } from "../src/engine/view-utils";
 import { normalPlayCost } from "../src/game/card/play-cost";
+import { playCostsOf } from "../src/engine/game-host";
 import type { GameUpdate } from "../src/presentation/protocol";
 
 const engine = createEngine({ cards: [...ALL_CARDS, testFollower("V1", 1, 1, 1), testFollower("V3", 3, 3, 3), testFollower("V5", 5, 5, 10), testSpell("S1", 1), { ...testSpell("GOLEM-SPELL", 8), traits: ["ゴーレム"] }], scripts: ALL_SCRIPTS });
@@ -209,6 +210,26 @@ describe("normal play cost presentation", () => {
     expect(normalPlayCost(update, card)).toBe(0);
     update.view.players[0].hand = [];
     expect(normalPlayCost(update, card)).toBeUndefined();
+  });
+  it("shows public EX reductions and taxes from either perspective without exposing a hidden hand", () => {
+    const t = drive(engine, { me: { field: ["BP05-071"] }, opp: { hand: ["V1"], ex: ["BP01-061", "BP13-060", "V3"], cemetery: Array(5).fill("S1") } });
+    const spell = t.id("opp:BP13-060"), chain = t.id("opp:BP01-061"), free = t.id("opp:V3"), hidden = t.id("opp:V1");
+    const expected = { [spell]: 3, [chain]: 6, [free]: 0 };
+    const u = edited(t, state => effect(state, free, { kind: "playCostSet", value: 0 }));
+    for (const seat of [0, 1] as const) {
+      const view = withoutMemory(u.game.view(seat));
+      const update = { view, perspective: seat, cardDetails: costs(u.game, seat), playCosts: playCostsOf(engine, u.game, seat, view) } as GameUpdate;
+      if (seat === 0) {
+        expect(update.playCosts?.[spell]).toBeUndefined();
+        expect(update.cardDetails[hidden]).toBeUndefined();
+      }
+      for (const card of view.players[1].ex) {
+        expect(normalPlayCost(update, card)).toBe(expected[card.id]);
+      }
+      const stale = view.players[1].ex.find(card => card.id === free)!;
+      view.players[1].ex = [];
+      expect(normalPlayCost(update, stale)).toBeUndefined();
+    }
   });
   it("queries crest/equipment passives but ignores an ordinary EX source and null costs", () => {
     const custom = createEngine({ cards: [testFollower("PLAIN", 5, 1, 1), testFollower("PASSIVE", 1, 1, 1), testCrest("CREST"), { ...testFollower("EQUIP", 0, 0, 0), type: "equipment", token: true }],

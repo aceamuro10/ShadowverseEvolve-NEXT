@@ -16,6 +16,7 @@ import { CardArt } from "./CardArt";
 import { CardText, CardTextLine } from "./CardText";
 import { displayOf } from "./display";
 import { giftLines } from "./gifts";
+import { normalPlayCost } from "./play-cost";
 import { tokenLinks } from "./token-links";
 
 const LANGS: readonly DataLang[] = ["en", "cn", "ja"];
@@ -48,7 +49,7 @@ export function CardDetails() {
  */
 export function CardPanel({ focus, details, exact = false, art = true, onToken }: { focus: FocusCard; details?: CardRuntimeDetails; exact?: boolean; art?: boolean; onToken?: (def: string) => void }) {
   const catalog = useApp((s) => s.catalog)!;
-  const playCosts = useApp((s) => s.update?.playCosts);
+  const update = useApp((s) => s.update);
   const { cardLang, uiLang, tokenArt } = useSettings();
   const t = useT();
   const [viewing, setViewing] = useState<readonly ArtFace[] | null>(null);
@@ -70,9 +71,9 @@ export function CardPanel({ focus, details, exact = false, art = true, onToken }
         {now !== undefined && now !== null && printed !== null && now !== printed ? <small>{t("card.printed", { value: printed })}</small> : null}
       </div>
     );
-  // CR 10.4.4.1 — one of the viewer's cards in their hand or EX area that would cost another number of play points to play
-  // now (the engine worker asks the core, GameUpdate.playCosts): beside its cost, which doesn't change.
-  const playCost = view ? playCosts?.[view.id] : undefined;
+  // CR 10.4.4.1 — show a changed normal play price beside the card's own cost, including the opponent's public EX cards.
+  const currentPlayCost = normalPlayCost(update, view);
+  const playCost = currentPlayCost !== view?.cost ? currentPlayCost : undefined;
   const text = cardText(def, cardLang);
   // The physical card's printings (a back face has none: its front's).
   const physical = def.frontFace ? catalog.def(def.frontFace) : def;
